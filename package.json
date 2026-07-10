@@ -1,0 +1,26 @@
+{
+  "name": "tourizia-hotel-api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cloudinary": "^2.10.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "helmet": "^8.2.0",
+    "mongoose": "^9.7.4",
+    "node-fetch": "^3.3.2",
+    "puppeteer-core": "^25.3.0",
+    "qrcode": "^1.5.4",
+    "resend": "^6.17.2",
+    "stripe": "^22.3.1"
+  }
+}
