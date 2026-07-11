@@ -1,0 +1,113 @@
+import fetch from "node-fetch";
+
+let amadeusToken = null;
+let amadeusExpire = 0;
+
+// ======================================
+// TOKEN
+// ======================================
+
+export async function getAmadeusToken() {
+
+    if (
+        amadeusToken &&
+        Date.now() < amadeusExpire
+    ) {
+        return amadeusToken;
+    }
+
+    const response = await fetch(
+        "https://test.api.amadeus.com/v1/security/oauth2/token",
+        {
+            method: "POST",
+
+            headers: {
+                "Content-Type":
+                    "application/x-www-form-urlencoded"
+            },
+
+            body:
+`grant_type=client_credentials&client_id=${process.env.AMADEUS_CLIENT_ID}&client_secret=${process.env.AMADEUS_CLIENT_SECRET}`
+        }
+    );
+
+    const data = await response.json();
+
+    if (!data.access_token) {
+        throw new Error("Impossible d'obtenir le token Amadeus");
+    }
+
+    amadeusToken = data.access_token;
+
+    amadeusExpire =
+        Date.now() +
+        (data.expires_in - 60) * 1000;
+
+    console.log("✅ Nouveau token Amadeus");
+
+    return amadeusToken;
+
+}
+// ======================================
+// SEARCH CITY
+// ======================================
+
+export async function findCities(keyword) {
+
+    const token =
+        await getAmadeusToken();
+
+    const response = await fetch(
+
+`https://test.api.amadeus.com/v1/reference-data/locations/cities?keyword=${encodeURIComponent(keyword)}`,
+
+        {
+
+            headers: {
+                Authorization:
+                    `Bearer ${token}`
+            }
+
+        }
+
+    );
+
+    const data =
+        await response.json();
+
+    return data.data || [];
+
+}
+// ======================================
+// SEARCH HOTELS
+// ======================================
+
+export async function findHotels(params) {
+
+    const token =
+        await getAmadeusToken();
+
+    const url =
+
+`https://test.api.amadeus.com/v3/shopping/hotel-offers?cityCode=${params.city}&checkInDate=${params.checkIn}&checkOutDate=${params.checkOut}&adults=${params.adults || 1}`;
+
+    console.log(url);
+
+    const response =
+        await fetch(url, {
+
+            headers: {
+
+                Authorization:
+                    `Bearer ${token}`
+
+            }
+
+        });
+
+    const data =
+        await response.json();
+
+    return data.data || [];
+
+}
