@@ -64,9 +64,18 @@ export async function searchHotels(req, res) {
 
     try {
 
-        const hotels = await findHotels(req.query);
+        const hotels =
+            await findHotels(req.query);
 
-        res.json(hotels);
+        res.json({
+
+            success: true,
+
+            total: hotels.length,
+
+            hotels
+
+        });
 
     }
 
@@ -75,6 +84,8 @@ export async function searchHotels(req, res) {
         console.log(err);
 
         res.status(500).json({
+
+            success: false,
 
             error: err.message
 

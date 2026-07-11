@@ -1,5 +1,5 @@
 import fetch from "node-fetch";
-
+import hotelNormalizer from "./hotelNormalizer.js";
 let amadeusToken = null;
 let amadeusExpire = 0;
 
@@ -104,10 +104,16 @@ console.log("API SECRET :", process.env.AMADEUS_API_SECRET);
 
     );
 
-    const data =
-        await response.json();
+    const data = await response.json();
 
-    return data.data || [];
+console.log(
+    "AMADEUS HOTELS:",
+    data.data?.length || 0
+);
+
+return hotelNormalizer(
+    data.data || []
+);
 
 }
 // ======================================
@@ -116,30 +122,60 @@ console.log("API SECRET :", process.env.AMADEUS_API_SECRET);
 
 export async function findHotels(params) {
 
-    const token =
-        await getAmadeusToken();
+    const token = await getAmadeusToken();
+
+    const {
+
+        city,
+
+        checkIn,
+
+        checkOut,
+
+        adults = 1
+
+    } = params;
+
+    if (!city || !checkIn || !checkOut) {
+
+        throw new Error("Missing required parameters");
+
+    }
 
     const url =
+`https://api.amadeus.com/v3/shopping/hotel-offers?cityCode=${city}&checkInDate=${checkIn}&checkOutDate=${checkOut}&adults=${adults}`;
 
-`https://test.api.amadeus.com/v3/shopping/hotel-offers?cityCode=${params.city}&checkInDate=${params.checkIn}&checkOutDate=${params.checkOut}&adults=${params.adults || 1}`;
-
+    console.log("");
+    console.log("🏨 HOTEL SEARCH");
     console.log(url);
+    console.log("");
 
-    const response =
-        await fetch(url, {
+    const response = await fetch(url, {
 
-            headers: {
+        headers: {
 
-                Authorization:
-                    `Bearer ${token}`
+            Authorization: `Bearer ${token}`
 
-            }
+        }
 
-        });
+    });
 
-    const data =
-        await response.json();
+    const data = await response.json();
 
-    return data.data || [];
+    if (data.errors) {
+
+        console.log("AMADEUS ERROR");
+        console.log(JSON.stringify(data, null, 2));
+
+        return [];
+
+    }
+
+    console.log(
+        "✅ HOTELS FOUND:",
+        data.data?.length || 0
+    );
+
+    return hotelNormalizer(data.data || []);
 
 }

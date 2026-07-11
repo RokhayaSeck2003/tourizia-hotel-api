@@ -17,13 +17,21 @@ app.use(express.json());
 app.use(helmet());
 
 // MongoDB
-mongoose.connect(process.env.MONGO_URI);
+if (process.env.MONGO_URI) {
 
-mongoose.connection.once("open", () => {
+    mongoose.connect(process.env.MONGO_URI);
 
-    console.log("✅ MongoDB connected");
+    mongoose.connection.once("open", () => {
 
-});
+        console.log("✅ MongoDB connected");
+
+    });
+
+} else {
+
+    console.log("⚠️ MongoDB désactivé (MONGO_URI absente)");
+
+}
 
 // Routes
 app.use("/api", hotelRoutes);
