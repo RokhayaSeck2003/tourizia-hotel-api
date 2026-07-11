@@ -27,15 +27,17 @@ export async function getAmadeusToken() {
             },
 
             body:
-`grant_type=client_credentials&client_id=${process.env.AMADEUS_CLIENT_ID}&client_secret=${process.env.AMADEUS_CLIENT_SECRET}`
+`grant_type=client_credentials&client_id=${process.env.AMADEUS_API_KEY}&client_secret=${process.env.AMADEUS_API_SECRET}`
         }
     );
 
     const data = await response.json();
 
-    if (!data.access_token) {
-        throw new Error("Impossible d'obtenir le token Amadeus");
-    }
+    console.log("AMADEUS TOKEN RESPONSE :", data);
+
+if (!data.access_token) {
+    throw new Error(JSON.stringify(data));
+}
 
     amadeusToken = data.access_token;
 
@@ -56,6 +58,8 @@ export async function findCities(keyword) {
 
     const token =
         await getAmadeusToken();
+        console.log("API KEY :", process.env.AMADEUS_API_KEY);
+console.log("API SECRET :", process.env.AMADEUS_API_SECRET);
 
     const response = await fetch(
 
