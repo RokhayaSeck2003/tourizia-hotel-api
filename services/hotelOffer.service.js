@@ -69,6 +69,9 @@ export async function searchHotelOffers(params) {
 `https://api.amadeus.com/v3/shopping/hotel-offers?hotelIds=${hotelIds}&checkInDate=${checkIn}&checkOutDate=${checkOut}&adults=${adults}`;
 
     console.log(url);
+    console.log("===== URL =====");
+console.log(url);
+console.log("================");
 
     const response =
 
@@ -82,6 +85,8 @@ export async function searchHotelOffers(params) {
             }
 
         });
+        console.log("STATUS =", response.status);
+console.log("OK =", response.ok);
 
     const data =
         await response.json();
@@ -95,6 +100,8 @@ export async function searchHotelOffers(params) {
         console.log(
             "AMADEUS HOTEL OFFER ERROR"
         );
+        console.log("RESPONSE:");
+console.log(JSON.stringify(data, null, 2));
 
         return [];
 
