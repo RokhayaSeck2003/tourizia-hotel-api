@@ -79,24 +79,3 @@ export async function getAmadeusToken() {
 
 }
 
-export async function findHotelsByCity(cityCode) {
-
-    const token = await getAmadeusToken();
-
-    const response = await fetch(
-
-`https://api.amadeus.com/v1/reference-data/locations/hotels/by-city?cityCode=${cityCode}`,
-
-        {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        }
-
-    );
-
-    const data = await response.json();
-
-    return data.data || [];
-
-}
