@@ -78,104 +78,25 @@ export async function getAmadeusToken() {
     }
 
 }
-// ======================================
-// SEARCH CITY
-// ======================================
 
-export async function findCities(keyword) {
-
-    const token =
-        await getAmadeusToken();
-        console.log("API KEY :", process.env.AMADEUS_API_KEY);
-console.log("API SECRET :", process.env.AMADEUS_API_SECRET);
-
-    const response = await fetch(
-
-`https://test.api.amadeus.com/v1/reference-data/locations/cities?keyword=${encodeURIComponent(keyword)}`,
-
-        {
-
-            headers: {
-                Authorization:
-                    `Bearer ${token}`
-            }
-
-        }
-
-    );
-
-    const data = await response.json();
-
-console.log(
-    "AMADEUS HOTELS:",
-    data.data?.length || 0
-);
-
-return hotelNormalizer(
-    data.data || []
-);
-
-}
-// ======================================
-// SEARCH HOTELS
-// ======================================
-
-export async function findHotels(params) {
+export async function findHotelsByCity(cityCode) {
 
     const token = await getAmadeusToken();
 
-    const {
+    const response = await fetch(
 
-        city,
+`https://api.amadeus.com/v1/reference-data/locations/hotels/by-city?cityCode=${cityCode}`,
 
-        checkIn,
-
-        checkOut,
-
-        adults = 1
-
-    } = params;
-
-    if (!city || !checkIn || !checkOut) {
-
-        throw new Error("Missing required parameters");
-
-    }
-
-    const url =
-`https://api.amadeus.com/v3/shopping/hotel-offers?cityCode=${city}&checkInDate=${checkIn}&checkOutDate=${checkOut}&adults=${adults}`;
-
-    console.log("");
-    console.log("🏨 HOTEL SEARCH");
-    console.log(url);
-    console.log("");
-
-    const response = await fetch(url, {
-
-        headers: {
-
-            Authorization: `Bearer ${token}`
-
+        {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
         }
 
-    });
+    );
 
     const data = await response.json();
 
-    if (data.errors) {
-
-        console.log("AMADEUS ERROR");
-        console.log(JSON.stringify(data, null, 2));
-
-        return [];
-
-    }
-
-    console.log(
-        "✅ HOTELS FOUND:",
-        data.data?.length || 0
-    );
-
-    return hotelNormalizer(data.data || []);
+    return data.data || [];
 
 }

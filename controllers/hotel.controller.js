@@ -1,12 +1,70 @@
 import {
 
-    getAmadeusToken,
+    searchHotelOffers
 
-    findHotels,
+}
+
+from "../services/hotelOffer.service.js";
+
+export async function searchHotels(req,res){
+
+    try{
+
+        const hotels =
+
+            await searchHotelOffers(
+                req.query
+            );
+
+        res.json({
+
+            success:true,
+
+            total:hotels.length,
+
+            hotels
+
+        });
+
+    }
+
+    catch(err){
+
+        console.log(err);
+
+        res.status(500).json({
+
+            error:err.message
+
+        });
+
+    }
+
+}
+
+import {
+
+    searchHotelOffers
+
+}
+
+from "../services/hotelOffer.service.js";
+
+import {
 
     findCities
 
-} from "../services/amadeus.service.js";
+}
+
+from "../services/hotelLookup.service.js";
+
+import {
+
+    getAmadeusToken
+
+}
+
+from "../services/amadeus.service.js";
 
 export async function getToken(req, res) {
 
@@ -60,18 +118,21 @@ export async function searchCities(req, res) {
 
 }
 
-export async function searchHotels(req, res) {
+export async function searchHotels(req,res){
 
-    try {
+    try{
 
         const hotels =
-            await findHotels(req.query);
+
+            await searchHotelOffers(
+                req.query
+            );
 
         res.json({
 
-            success: true,
+            success:true,
 
-            total: hotels.length,
+            total:hotels.length,
 
             hotels
 
@@ -79,15 +140,13 @@ export async function searchHotels(req, res) {
 
     }
 
-    catch (err) {
+    catch(err){
 
         console.log(err);
 
         res.status(500).json({
 
-            success: false,
-
-            error: err.message
+            error:err.message
 
         });
 
