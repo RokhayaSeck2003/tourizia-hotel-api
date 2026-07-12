@@ -21,19 +21,24 @@ export async function getToken(req,res){
 
 }
 
-export async function searchCities(req,res){
+export async function searchCities(req, res) {
 
-    try{
+    console.log("➡️ searchCities appelée");
 
-        const cities =
-            await findCities(req.query.city);
+    try {
 
-        res.json(cities);
+        const data = await findCities(req.query.city);
 
-    }catch(err){
+        console.log(data);
+
+        res.json(data);
+
+    } catch (err) {
+
+        console.log(err);
 
         res.status(500).json({
-            error:err.message
+            error: err.message
         });
 
     }
