@@ -717,6 +717,11 @@ async function searchHotelOffers(data) {
                 null,
                 2
             )
+        );
+
+        throw new Error(
+            result.message ||
+            result.error ||
             "LiteAPI rates error"
         );
 
@@ -4222,8 +4227,3 @@ console.log("🔥 PING ROUTE CHARGÉE");
 // ============================================================
 
 
-const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
-});
