@@ -717,11 +717,6 @@ async function searchHotelOffers(data) {
                 null,
                 2
             )
-        );
-
-        throw new Error(
-            result.message ||
-            result.error ||
             "LiteAPI rates error"
         );
 
