@@ -54,7 +54,11 @@ const stripe = process.env.STRIPE_SECRET_KEY
 const HOTEL_STRIPE_PRICE = 1500; // USD 15
 
 const HOTEL_PAYTECH_PRICE = 8500; // XOF 8 500
+// ============================================================
+// OFFRES HÔTEL EN ATTENTE DE PAIEMENT STRIPE
+// ============================================================
 
+const pendingHotelPayments = new Map();
 // ============================================================
 // CORS
 // ============================================================
@@ -265,81 +269,99 @@ app.post(
         // DONNÉES RÉSERVATION
         // ----------------------------------------------------
 
+        const offerToken =
+    metadata.offerToken;
+
+const pendingPayment =
+    offerToken
+        ? pendingHotelPayments.get(offerToken)
+        : null;
+
+const storedOffer =
+    pendingPayment?.offer || null;
+
         const hotelData = {
 
-            paymentId,
+    paymentId,
 
-            stripeSessionId:
-                session.id,
+    stripeSessionId:
+        session.id,
 
-            paymentMethod:
-                "stripe",
+    paymentMethod:
+        "stripe",
 
-            email:
-                metadata.email ||
-                session.customer_email,
+    email:
+        metadata.email ||
+        session.customer_email,
 
-            fullName:
-                metadata.fullName ||
-                "",
+    fullName:
+        metadata.fullName ||
+        "",
 
-            city:
-                metadata.city,
+    city:
+        metadata.city,
 
-            countryCode:
-                metadata.countryCode ||
-                "FR",
+    countryCode:
+        metadata.countryCode ||
+        "FR",
 
-            checkIn:
-                metadata.checkIn,
+    checkIn:
+        metadata.checkIn,
 
-            checkOut:
-                metadata.checkOut,
+    checkOut:
+        metadata.checkOut,
 
-            adults:
-                Number(
-                    metadata.adults ||
-                    2
-                ),
+    adults:
+        Number(
+            metadata.adults ||
+            2
+        ),
 
-            children:
-                Number(
-                    metadata.children ||
-                    0
-                ),
+    children:
+        Number(
+            metadata.children ||
+            0
+        ),
 
-            rooms:
-                Number(
-                    metadata.rooms ||
-                    1
-                ),
+    rooms:
+        Number(
+            metadata.rooms ||
+            1
+        ),
 
-            guestNationality:
-                metadata.guestNationality ||
-                "SN",
+    guestNationality:
+        metadata.guestNationality ||
+        "SN",
 
-            // -----------------------------------------------
-            // OFFRE LITEAPI PRÉ-SÉLECTIONNÉE
-            // -----------------------------------------------
+    // -----------------------------------------------
+    // OFFRE LITEAPI PRÉ-SÉLECTIONNÉE
+    // -----------------------------------------------
 
-            hotelId:
-                metadata.hotelId,
+    hotelId:
+        storedOffer?.hotelId ||
+        metadata.hotelId,
 
-            hotelName:
-                metadata.hotelName,
+    hotelName:
+        storedOffer?.hotelName ||
+        metadata.hotelName,
 
-            roomName:
-                metadata.roomName,
+    roomName:
+        storedOffer?.roomName ||
+        metadata.roomName,
 
-            offerId:
-                metadata.offerId,
+    offerId:
+        storedOffer?.offerId ||
+        null,
 
-            providerPrice:
-                metadata.providerPrice,
+    providerPrice:
+        storedOffer?.price ||
+        metadata.providerPrice,
 
-            providerCurrency:
-                metadata.providerCurrency ||
-                "EUR"
+    providerCurrency:
+        storedOffer?.currency ||
+        metadata.providerCurrency ||
+        "EUR"
+
 
         };
 
@@ -403,7 +425,15 @@ app.post(
 
     }
 );
+// ============================================================
+// EXPRESS JSON
+// ============================================================
+// Doit être après le webhook Stripe RAW
+// pour que toutes les routes POST suivantes
+// puissent lire req.body.
+// ============================================================
 
+app.use(express.json());
 // ============================================================
 // LITEAPI HEADERS
 // ============================================================
@@ -778,6 +808,8 @@ async function searchHotelOffers(data) {
         }
 
     }
+
+    
 
     console.log(
         "🏨 OFFRES TROUVÉES:",
@@ -1305,7 +1337,73 @@ app.post(
 
     }
 );
+app.post(
+    "/api/test-book",
+    express.json(),
+    async (req, res) => {
+        try {
+            const {
+                prebookId,
+                fullName,
+                email,
+                phone,
+                adults,
+                children
+            } = req.body;
 
+            if (!prebookId) {
+                return res.status(400).json({
+                    success: false,
+                    error: "prebookId manquant"
+                });
+            }
+
+            if (!email) {
+                return res.status(400).json({
+                    success: false,
+                    error: "email manquant"
+                });
+            }
+
+            const data = {
+                prebookId,
+                fullName: fullName || "CLIENT TEST",
+                email,
+                phone: phone || "",
+                adults: Number(adults || 2),
+                children: Number(children || 0),
+                paymentId: "TEST-" + Date.now()
+            };
+
+            console.log("🧪 TEST BOOK LITEAPI");
+            console.log("PREBOOK ID:", prebookId);
+            console.log("EMAIL:", email);
+
+            const result = await bookHotel(
+                data,
+                prebookId
+            );
+
+            return res.json({
+                success: true,
+                result
+            });
+
+        } catch (error) {
+            console.error(
+                "❌ TEST BOOK ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                error:
+                    error.message ||
+                    "Erreur test book"
+            });
+        }
+    }
+);
 
 // ============================================================
 // HELPER — NORMALISER LE NOM DE L'HÔTEL
@@ -1445,6 +1543,21 @@ console.log(
   "✅ Offre sélectionnée :",
   selectedOffer.offerId
 );
+const offerToken =
+  "HOTEL-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+
+pendingHotelPayments.set(
+  offerToken,
+  {
+    offer: selectedOffer,
+    data
+  }
+);
+
+console.log(
+  "🔐 OFFER TOKEN STRIPE:",
+  offerToken
+);
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -1498,14 +1611,16 @@ console.log(
 
         // Offre sélectionnée côté serveur
         hotelId: selectedOffer.hotelId || "",
-        hotelName: selectedOffer.hotelName || "",
-        roomName: selectedOffer.roomName || "",
+hotelName: selectedOffer.hotelName || "",
+roomName: selectedOffer.roomName || "",
 
-        providerPrice:
-          String(selectedOffer.price || ""),
+offerToken: offerToken,
 
-        providerCurrency:
-          selectedOffer.currency || "EUR"
+providerPrice:
+    String(selectedOffer.price || ""),
+
+providerCurrency:
+    selectedOffer.currency || "EUR"
       }
     });
 
@@ -1943,66 +2058,36 @@ async function bookHotel(
             data.children || 0
         );
 
-    const guests = [];
+   // --------------------------------------------------------
+// GUESTS
+// --------------------------------------------------------
+// LiteAPI attend 1 guest principal par chambre.
+// occupancyNumber = numéro de la chambre,
+// PAS le nombre de personnes.
+//
+// Exemple :
+// 1 chambre + 2 adultes = 1 guest avec occupancyNumber: 1
+// 2 chambres = 2 guests avec occupancyNumber: 1 et 2
+// --------------------------------------------------------
 
-    // --------------------------------------------------------
-    // ADULTES
-    // --------------------------------------------------------
+const rooms = Number(
+    data.rooms || 1
+);
 
-    for (
-        let i = 0;
-        i < adults;
-        i++
-    ) {
+const guests = [];
 
-        guests.push({
-
-            firstName:
-                i === 0
-                    ? firstName
-                    : `Guest${i + 1}`,
-
-            lastName:
-                i === 0
-                    ? lastName
-                    : "Tourizia",
-
-            email:
-                i === 0
-                    ? email
-                    : undefined,
-
-            type:
-                "adult"
-
-        });
-
-    }
-
-    // --------------------------------------------------------
-    // ENFANTS
-    // --------------------------------------------------------
-
-    for (
-        let i = 0;
-        i < children;
-        i++
-    ) {
-
-        guests.push({
-
-            firstName:
-                `Child${i + 1}`,
-
-            lastName:
-                lastName,
-
-            type:
-                "child"
-
-        });
-
-    }
+for (
+    let i = 0;
+    i < rooms;
+    i++
+) {
+    guests.push({
+        occupancyNumber: i + 1,
+        firstName,
+        lastName,
+        email
+    });
+}
 
     // --------------------------------------------------------
     // PAIEMENT LITEAPI
@@ -2363,6 +2448,12 @@ async function processHotelAfterPayment(
 
         paymentMethod:
             data.paymentMethod,
+            
+            // 📧 Coordonnées client
+    email: data.email,
+    fullName: data.fullName,
+    phone: data.phone,
+
 
         bookingId,
 
@@ -3810,6 +3901,12 @@ async function generateAndSendHotelConfirmation(
     // EMAIL
     // --------------------------------------------------------
 
+    console.log("📧 EMAIL DEBUG:", {
+    email: booking.email,
+    fullName: booking.fullName,
+    hotelName: booking.hotelName,
+    confirmationNumber: booking.confirmationNumber
+});
     await sendHotelEmail(
         booking,
         pdf,
@@ -4129,33 +4226,9 @@ console.log("🔥 PING ROUTE CHARGÉE");
 // SERVER
 // ============================================================
 
-app.listen(
-    PORT,
-    () => {
 
-        console.log("");
-        console.log(
-            "======================================"
-        );
+const PORT = process.env.PORT || 10000;
 
-        console.log(
-            "🏨 TOURIZIA HOTEL API"
-        );
-
-        console.log(
-            "Provider: LiteAPI"
-        );
-
-        console.log(
-            "Server running on port",
-            PORT
-        );
-
-        console.log(
-            "======================================"
-        );
-
-        console.log("");
-
-    }
-);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
+});
