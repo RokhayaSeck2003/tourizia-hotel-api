@@ -1009,94 +1009,62 @@ async function prebookHotelOffer(offerId) {
 }
 
 
-// ============================================================
-// TROUVER UNE OFFRE RÉSERVABLE
-// ============================================================
-
 async function findPrebookableOffer(data) {
 
-    console.log(
-        "🔎 RECHERCHE D'UNE OFFRE RÉSERVABLE..."
-    );
+  console.log(
+    "🔎 RECHERCHE D'UNE OFFRE RÉSERVABLE..."
+  );
 
-    const searchResult =
-        await searchHotelOffers(
-            data
-        );
+  const searchResult =
+    await searchHotelOffers(data);
 
-    const offers =
-        searchResult.offers || [];
+  const offers =
+    searchResult.offers || [];
 
-    if (!offers.length) {
-
-        throw new Error(
-            "Aucune offre hôtel disponible pour ces dates"
-        );
-
-    }
-
-    console.log(
-        `🏨 ${offers.length} offre(s) trouvée(s)`
-    );
-
-    /*
-     * On teste les offres une par une.
-     *
-     * Si une offre n'est plus disponible,
-     * LiteAPI renvoie une erreur.
-     *
-     * On passe alors automatiquement
-     * à l'offre suivante.
-     */
-
-    for (
-        const offer of offers
-    ) {
-
-        try {
-
-            console.log(
-                "🧪 TEST OFFER:",
-                offer.offerId
-            );
-
-            const prebook =
-                await prebookHotelOffer(
-                    offer.offerId
-                );
-
-            console.log(
-                "✅ OFFER RÉSERVABLE:",
-                offer.offerId
-            );
-
-            return {
-
-                offer,
-
-                prebook
-
-            };
-
-        } catch (error) {
-
-            console.warn(
-                "⚠️ OFFER NON RÉSERVABLE:",
-                offer.offerId
-            );
-
-            console.warn(
-                error.message
-            );
-
-        }
-
-    }
-
+  if (!offers.length) {
     throw new Error(
-        "Aucune offre hôtel n'a pu être pré-réservée"
+      "Aucune offre hôtel disponible pour ces dates"
     );
+  }
 
+  for (const offer of offers) {
+
+    try {
+
+      console.log(
+        "🧪 TEST OFFER:",
+        offer.offerId
+      );
+
+      const prebook =
+        await prebookHotelOffer(
+          offer.offerId
+        );
+
+      console.log(
+        "✅ OFFER RÉSERVABLE:",
+        offer.offerId
+      );
+
+      return {
+        offer,
+        prebook
+      };
+
+    } catch (error) {
+
+      console.warn(
+        "⚠️ OFFER NON RÉSERVABLE:",
+        offer.offerId,
+        error.message
+      );
+
+    }
+  }
+
+  throw new Error(
+    "Aucune offre hôtel n'a pu être pré-réservée"
+  );
 }
 
 
