@@ -3497,8 +3497,66 @@ async function generateHotelPDF(
      * par CHROME_EXECUTABLE_PATH.
      */
 
-    const browser =
+    const chromeCache =
+    process.env.PUPPETEER_CACHE_DIR ||
+    "/opt/render/.cache/puppeteer";
+
+let executablePath =
+    process.env.CHROME_EXECUTABLE_PATH ||
+    process.env.PUPPETEER_EXECUTABLE_PATH;
+
+if (!executablePath && fs.existsSync(chromeCache)) {
+
+    const findChrome = (dir) => {
+
+        for (const entry of fs.readdirSync(dir, {
+            withFileTypes: true
+        })) {
+
+            const fullPath =
+                path.join(dir, entry.name);
+
+            if (
+                entry.isFile() &&
+                entry.name === "chrome"
+            ) {
+                return fullPath;
+            }
+
+            if (entry.isDirectory()) {
+
+                const found =
+                    findChrome(fullPath);
+
+                if (found) {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    };
+
+    executablePath =
+        findChrome(chromeCache);
+}
+
+if (!executablePath) {
+
+    throw new Error(
+        "Chrome introuvable dans le cache Puppeteer Render"
+    );
+}
+
+console.log(
+    "🌐 CHROME UTILISÉ:",
+    executablePath
+);
+
+const browser =
     await puppeteer.launch({
+
+        executablePath,
 
         headless: true,
 
@@ -3509,7 +3567,7 @@ async function generateHotelPDF(
         ]
 
     });
-    
+
     try {
 
         const page =
