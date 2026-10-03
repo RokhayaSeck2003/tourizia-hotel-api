@@ -3497,34 +3497,19 @@ async function generateHotelPDF(
      * par CHROME_EXECUTABLE_PATH.
      */
 
-    const executablePath =
-        process.env.CHROME_EXECUTABLE_PATH ||
-        process.env.PUPPETEER_EXECUTABLE_PATH;
-
-    if (!executablePath) {
-
-        throw new Error(
-            "CHROME_EXECUTABLE_PATH manquant"
-        );
-
-    }
-
     const browser =
-        await puppeteer.launch({
+    await puppeteer.launch({
 
-            executablePath,
+        headless: true,
 
-            headless:
-                true,
+        args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage"
+        ]
 
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage"
-            ]
-
-        });
-
+    });
+    
     try {
 
         const page =
