@@ -3499,7 +3499,7 @@ async function generateHotelPDF(
 
     const chromeCache =
     process.env.PUPPETEER_CACHE_DIR ||
-    "/opt/render/.cache/puppeteer";
+    "/opt/render/project/src/.puppeteer";
 
 let executablePath =
     process.env.CHROME_EXECUTABLE_PATH ||
