@@ -3485,29 +3485,24 @@ body {
 // GÉNÉRATION PDF AVEC PUPPETEER
 // ============================================================
 
-async function generateHotelPDF(
-    html
-) {
+async function generateHotelPDF(html) {
 
-    /*
-     * Cette fonction utilise Chromium/Puppeteer.
-     *
-     * Selon ton environnement Render,
-     * le chemin Chrome peut être fourni
-     * par CHROME_EXECUTABLE_PATH.
-     */
+    const possibleChromePaths = [
+        "/opt/render/project/src/.puppeteer/chrome",
+        "/opt/render/.cache/puppeteer",
+        "/opt/render/project/src/.cache/puppeteer"
+    ];
 
-    const chromeCache =
-    process.env.PUPPETEER_CACHE_DIR ||
-    "/opt/render/project/src/.puppeteer";
-
-let executablePath =
-    process.env.CHROME_EXECUTABLE_PATH ||
-    process.env.PUPPETEER_EXECUTABLE_PATH;
-
-if (!executablePath && fs.existsSync(chromeCache)) {
+    let executablePath =
+        process.env.CHROME_EXECUTABLE_PATH ||
+        process.env.PUPPETEER_EXECUTABLE_PATH ||
+        null;
 
     const findChrome = (dir) => {
+
+        if (!fs.existsSync(dir)) {
+            return null;
+        }
 
         for (const entry of fs.readdirSync(dir, {
             withFileTypes: true
@@ -3537,36 +3532,60 @@ if (!executablePath && fs.existsSync(chromeCache)) {
         return null;
     };
 
-    executablePath =
-        findChrome(chromeCache);
-}
+    if (!executablePath) {
 
-if (!executablePath) {
+        for (const chromePath of possibleChromePaths) {
 
-    throw new Error(
-        "Chrome introuvable dans le cache Puppeteer Render"
+            console.log(
+                "🔎 RECHERCHE CHROME:",
+                chromePath
+            );
+
+            executablePath =
+                findChrome(chromePath);
+
+            if (executablePath) {
+                break;
+            }
+        }
+    }
+
+    if (!executablePath) {
+
+        console.error(
+            "❌ CHROME INTROUVABLE"
+        );
+
+        console.error(
+            "PWD:",
+            process.cwd()
+        );
+
+        console.error(
+            "PUPPETEER_CACHE_DIR:",
+            process.env.PUPPETEER_CACHE_DIR
+        );
+
+        throw new Error(
+            "Chrome introuvable sur Render"
+        );
+    }
+
+    console.log(
+        "🌐 CHROME UTILISÉ:",
+        executablePath
     );
-}
 
-console.log(
-    "🌐 CHROME UTILISÉ:",
-    executablePath
-);
-
-const browser =
-    await puppeteer.launch({
-
-        executablePath,
-
-        headless: true,
-
-        args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage"
-        ]
-
-    });
+    const browser =
+        await puppeteer.launch({
+            executablePath,
+            headless: true,
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+        });
 
     try {
 
@@ -3576,23 +3595,23 @@ const browser =
         await page.setContent(
             html,
             {
-                waitUntil:
-                    "networkidle0"
+                waitUntil: "networkidle0"
             }
         );
 
-       const pdf = await page.pdf({
-    format: "A4",
-    printBackground: true,
-    preferCSSPageSize: true,
-    scale: 0.90,
-    margin: {
-        top: "0",
-        right: "0",
-        bottom: "0",
-        left: "0"
-    }
-});
+        const pdf =
+            await page.pdf({
+                format: "A4",
+                printBackground: true,
+                preferCSSPageSize: true,
+                scale: 0.90,
+                margin: {
+                    top: "0",
+                    right: "0",
+                    bottom: "0",
+                    left: "0"
+                }
+            });
 
         return pdf;
 
@@ -3601,7 +3620,6 @@ const browser =
         await browser.close();
 
     }
-
 }
 
 
