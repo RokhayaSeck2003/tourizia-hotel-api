@@ -4099,6 +4099,8 @@ async function generateAndSendHotelConfirmation(
 
 });
 
+    }
+
 
     // ========================================================
     // EMAIL UNIQUE AVEC TOUS LES PDF
