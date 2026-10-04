@@ -332,6 +332,15 @@ const storedOffer =
     guestNationality:
         metadata.guestNationality ||
         "SN",
+        guests:
+    Array.isArray(
+        pendingPayment?.data?.guests
+    )
+        ? pendingPayment.data.guests
+        : [],
+        totalPersons:
+    Number(metadata.adults || 0) +
+    Number(metadata.children || 0),
 
     // -----------------------------------------------
     // OFFRE LITEAPI PRÉ-SÉLECTIONNÉE
@@ -1480,13 +1489,91 @@ app.post(
     const validation = validateHotelRequest(req.body);
 
 if (validation) {
+
     return res.status(400).json({
         success: false,
         error: validation
     });
+
 }
 
 const data = req.body;
+
+
+// ========================================================
+// 👥 NOMBRE TOTAL DE VOYAGEURS
+// ========================================================
+
+const adults =
+    Number(data.adults || 0);
+
+const children =
+    Number(data.children || 0);
+
+const totalPersons =
+    adults + children;
+
+
+// ========================================================
+// 🛡️ SÉCURITÉ
+// ========================================================
+
+if (totalPersons < 1) {
+
+    return res.status(400).json({
+
+        success: false,
+
+        error:
+            "Nombre de voyageurs invalide."
+
+    });
+
+}
+
+
+// ========================================================
+// 🛡️ VÉRIFIER LES NOMS DES VOYAGEURS
+// ========================================================
+
+if (
+    !Array.isArray(data.guests) ||
+    data.guests.length !== totalPersons
+) {
+
+    return res.status(400).json({
+
+        success: false,
+
+        error:
+            `Les informations des ${totalPersons} voyageurs sont requises.`
+
+    });
+
+}
+
+
+for (
+    const guest of data.guests
+) {
+
+    if (
+        !guest.firstName ||
+        !guest.lastName
+    ) {
+
+        return res.status(400).json({
+
+            success: false,
+
+            error:
+                "Le prénom et le nom de chaque voyageur sont obligatoires."
+
+        });
+
+    }
+
+}
 
     console.log("🏨 Création paiement Stripe hôtel...");
     console.log(data);
@@ -1544,7 +1631,7 @@ console.log(
             unit_amount: HOTEL_STRIPE_PRICE
           },
 
-          quantity: 1
+          quantity: totalPersons
         }
       ],
 
@@ -2451,14 +2538,24 @@ async function processHotelAfterPayment(
         checkOut:
             data.checkOut,
 
-        adults:
-            data.adults,
+       adults:
+    data.adults,
 
-        children:
-            data.children,
+children:
+    data.children,
 
-        rooms:
-            data.rooms,
+// 👥 VOYAGEURS
+guests:
+    Array.isArray(data.guests)
+        ? data.guests
+        : [],
+
+totalPersons:
+    Number(data.adults || 0) +
+    Number(data.children || 0),
+
+rooms:
+    data.rooms,
 
         providerPrice:
             selectedOffer.price ||
@@ -2764,8 +2861,17 @@ function buildHotelPDFHTML(
         );
 
     const customer =
-        data.fullName ||
-        "Client Tourizia";
+    data.guestName ||
+    data.fullName ||
+    "Client Tourizia";
+    const guestType =
+    data.guestType || "adult";
+
+const guestNumber =
+    Number(data.guestNumber || 1);
+
+const totalGuests =
+    Number(data.totalGuests || 1);
 
     return `
 
@@ -3328,12 +3434,21 @@ body {
             <div class="card">
 
                 <div class="label">
-                    Voyageur principal
-                </div>
+    Voyageur
+</div>
 
-                <div class="value">
-                    ${escapeHtml(customer)}
-                </div>
+<div class="value">
+    ${escapeHtml(customer)}
+</div> 
+<div
+    style="
+        margin-top:6px;
+        font-size:12px;
+        color:#6c7882;
+    "
+>
+    Personne ${guestNumber} sur ${totalGuests}
+</div>
 
             </div>
 
@@ -3699,15 +3814,11 @@ async function uploadHotelPDF(
 // ============================================================
 // ENVOYER EMAIL CLIENT
 // ============================================================
-async function sendHotelEmail(data, pdfBuffer, reference) {
-const attachmentBase64 = Buffer.isBuffer(pdfBuffer)
-    ? pdfBuffer.toString("base64")
-    : Buffer.from(pdfBuffer).toString("base64");
-
-console.log("📎 PDF TYPE:", typeof pdfBuffer);
-console.log("📎 IS BUFFER:", Buffer.isBuffer(pdfBuffer));
-console.log("📎 BASE64 TYPE:", typeof attachmentBase64);
-console.log("📎 BASE64 LENGTH:", attachmentBase64.length);
+async function sendHotelEmail(
+    data,
+    pdfs,
+    reference
+) {
 
 const emailPayload = {
     from: "Tourizia <tickets@tourizia.com>",
@@ -3794,12 +3905,8 @@ const emailPayload = {
         </div>
     `,
 
-    attachments: [
-        {
-            filename: `reservation-hotel-${reference}.pdf`,
-            content: attachmentBase64
-        }
-    ]
+   attachments:
+    pdfs
 };
 
 console.log(
@@ -3853,12 +3960,13 @@ async function generateAndSendHotelConfirmation(
 ) {
 
     console.log(
-        "📄 GÉNÉRATION DOCUMENT HÔTEL..."
+        "📄 GÉNÉRATION DOCUMENTS HÔTEL..."
     );
 
-    // --------------------------------------------------------
-    // RÉFÉRENCE
-    // --------------------------------------------------------
+
+    // ========================================================
+    // RÉFÉRENCE UNIQUE
+    // ========================================================
 
     const reference =
         booking.confirmationNumber ||
@@ -3868,87 +3976,146 @@ async function generateAndSendHotelConfirmation(
     booking.confirmationNumber =
         reference;
 
-    // --------------------------------------------------------
-    // CONSTRUIRE HTML
-    // --------------------------------------------------------
 
-    const html =
-        buildHotelPDFHTML(
-            booking
-        );
+    // ========================================================
+    // VOYAGEURS
+    // ========================================================
 
-    // --------------------------------------------------------
-    // GÉNÉRER PDF
-    // --------------------------------------------------------
+    const guests =
+        Array.isArray(booking.guests) &&
+        booking.guests.length
+            ? booking.guests
+            : [{
+                type: "adult",
 
-    const pdf =
-        await generateHotelPDF(
-            html
-        );
+                firstName:
+                    booking.fullName
+                        ?.split(" ")[0] ||
+                    "Client",
+
+                lastName:
+                    booking.fullName
+                        ?.split(" ")
+                        .slice(1)
+                        .join(" ") ||
+                    "Tourizia"
+            }];
+
 
     console.log(
-        "📄 HOTEL PDF GENERATED:",
-        !!pdf
+        "👥 NOMBRE DE VOYAGEURS:",
+        guests.length
     );
 
-    console.log(
-        "📄 HOTEL PDF SIZE:",
-        pdf
-            ? pdf.length
-            : 0
-    );
 
-    // --------------------------------------------------------
-    // CLOUDINARY
-    // --------------------------------------------------------
+    // ========================================================
+    // GÉNÉRER UN PDF PAR PERSONNE
+    // ========================================================
 
-    let pdfUrl = null;
+    const pdfs = [];
 
-    try {
 
-        pdfUrl =
-            await uploadHotelPDF(
-                pdf,
-                reference
+    for (
+        let i = 0;
+        i < guests.length;
+        i++
+    ) {
+
+        const guest =
+            guests[i];
+
+
+        const guestName =
+            `${guest.firstName || ""} ${guest.lastName || ""}`
+                .trim();
+
+
+        console.log(
+            `📄 PDF VOYAGEUR ${i + 1}/${guests.length}:`,
+            guestName
+        );
+
+
+        const guestBooking = {
+
+            ...booking,
+
+            // Personne concernée
+            guestName,
+
+            guestType:
+                guest.type || "adult",
+
+            guestNumber:
+                i + 1,
+
+            totalGuests:
+                guests.length
+
+        };
+
+
+        // ----------------------------------------------------
+        // HTML PDF
+        // ----------------------------------------------------
+
+        const html =
+            buildHotelPDFHTML(
+                guestBooking
             );
 
-    } catch (error) {
 
-        /*
-         * Le PDF reste disponible en mémoire
-         * pour l'envoi email même si Cloudinary
-         * rencontre momentanément un problème.
-         */
+        // ----------------------------------------------------
+        // PDF
+        // ----------------------------------------------------
 
-        console.error(
-            "⚠️ CLOUDINARY HOTEL ERROR:",
-            error
+        const pdf =
+            await generateHotelPDF(
+                html
+            );
+
+
+        console.log(
+            "📄 PDF GENERATED:",
+            i + 1,
+            pdf?.length || 0
         );
+
+
+        // ----------------------------------------------------
+        // PIÈCE JOINTE
+        // ----------------------------------------------------
+
+        pdfs.push({
+
+            filename:
+                `reservation-hotel-${reference}-personne-${i + 1}.pdf`,
+
+            content:
+                pdf.toString("base64")
+
+        });
 
     }
 
-    // --------------------------------------------------------
-    // EMAIL
-    // --------------------------------------------------------
 
-    console.log("📧 EMAIL DEBUG:", {
-    email: booking.email,
-    fullName: booking.fullName,
-    hotelName: booking.hotelName,
-    confirmationNumber: booking.confirmationNumber
-});
+    // ========================================================
+    // EMAIL UNIQUE AVEC TOUS LES PDF
+    // ========================================================
+
     await sendHotelEmail(
         booking,
-        pdf,
+        pdfs,
         reference
     );
+
 
     console.log(
         "======================================"
     );
 
     console.log(
-        "🎉 DOCUMENT HÔTEL ENVOYÉ"
+        "🎉 DOCUMENTS HÔTEL ENVOYÉS"
     );
 
     console.log(
@@ -3962,24 +4129,25 @@ async function generateAndSendHotelConfirmation(
     );
 
     console.log(
-        "PDF URL:",
-        pdfUrl
+        "PDF:",
+        pdfs.length
     );
 
     console.log(
         "======================================"
     );
 
+
     return {
 
         reference,
 
-        pdfUrl
+        pdfUrl:
+            null
 
     };
 
 }
-
 
 // ============================================================
 // ENDPOINT DE TEST PDF HÔTEL
