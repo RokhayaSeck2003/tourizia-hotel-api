@@ -4088,15 +4088,16 @@ async function generateAndSendHotelConfirmation(
 
         pdfs.push({
 
-            filename:
-                `reservation-hotel-${reference}-personne-${i + 1}.pdf`,
+    filename:
+        `reservation-hotel-${reference}-personne-${i + 1}.pdf`,
 
-            content:
-                pdf.toString("base64")
+    content:
+        Buffer.from(pdf).toString("base64"),
 
-        });
+    content_type:
+        "application/pdf"
 
-    }
+});
 
 
     // ========================================================
