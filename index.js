@@ -341,6 +341,7 @@ const storedOffer =
         totalPersons:
     Number(metadata.adults || 0) +
     Number(metadata.children || 0),
+    
 
     // -----------------------------------------------
     // OFFRE LITEAPI PRÉ-SÉLECTIONNÉE
@@ -357,6 +358,9 @@ const storedOffer =
     roomName:
         storedOffer?.roomName ||
         metadata.roomName,
+        refundable:
+    storedOffer?.refundable ||
+    null,
 
     offerId:
         storedOffer?.offerId ||
@@ -2844,6 +2848,17 @@ function buildHotelPDFHTML(
         formatHotelDate(
             data.checkOut
         );
+        const durationNights =
+    Math.max(
+        0,
+        Math.round(
+            (
+                new Date(data.checkOut) -
+                new Date(data.checkIn)
+            ) /
+            (1000 * 60 * 60 * 24)
+        )
+    );
 
     const adults =
         Number(
@@ -2859,6 +2874,8 @@ function buildHotelPDFHTML(
         Number(
             data.rooms || 1
         );
+        const refundable =
+    data.refundable || null;
 
     const customer =
     data.guestName ||
@@ -3450,6 +3467,19 @@ body {
     Personne ${guestNumber} sur ${totalGuests}
 </div>
 
+<div
+    style="
+        margin-top:4px;
+        font-size:12px;
+        color:#6c7882;
+    "
+>
+    ${
+        guestType === "child"
+            ? "Enfant"
+            : "Adulte"
+    }
+</div>
             </div>
 
 
@@ -3474,6 +3504,18 @@ body {
                 Détails du séjour
             </div>
 
+            <div class="row">
+
+    <div class="row-label">
+        Durée
+    </div>
+
+    <div class="row-value">
+        ${durationNights}
+        nuit${durationNights > 1 ? "s" : ""}
+    </div>
+
+</div>
             <div class="details">
 
                 <div class="row">
@@ -3489,6 +3531,17 @@ body {
                 </div>
 
 
+                <div class="row">
+
+    <div class="row-label">
+        Voyageurs
+    </div>
+
+    <div class="row-value">
+        ${adults + children}
+    </div>
+
+</div> 
                 <div class="row">
 
                     <div class="row-label">
@@ -3545,7 +3598,27 @@ body {
             </div>
 
         </div>
+${
+    refundable
+        ? `
+            <div class="section">
 
+                <div class="section-title">
+                    Conditions tarifaires
+                </div>
+
+                <div class="notice">
+                    ${escapeHtml(
+                        typeof refundable === "string"
+                            ? refundable
+                            : JSON.stringify(refundable)
+                    )}
+                </div>
+
+            </div>
+        `
+        : ""
+}
 
         <div class="notice">
 
