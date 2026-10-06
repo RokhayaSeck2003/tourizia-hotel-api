@@ -13,6 +13,11 @@ import path from "path";
 import { Resend } from "resend";
 import { v2 as cloudinary } from "cloudinary";
 import puppeteer from "puppeteer-core";
+// ============================================================
+// 💳 PAYTECH HOTEL IPN
+// ============================================================
+
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -1732,6 +1737,33 @@ if (validation) {
 }
 
 const data = req.body;
+// ========================================================
+// 👥 TOTAL VOYAGEURS
+// ========================================================
+
+const adults =
+    Number(data.adults || 0);
+
+const children =
+    Number(data.children || 0);
+
+const totalPersons =
+    adults + children;
+
+if (totalPersons < 1) {
+
+    return res.status(400).json({
+
+        success: false,
+
+        error:
+            "Nombre de voyageurs invalide."
+
+    });
+
+}
+const totalPaytechAmount =
+    HOTEL_PAYTECH_PRICE * totalPersons;
 
     console.log(
       `🏨 Création paiement PayTech hôtel — ${targetPayment}`
@@ -1791,6 +1823,13 @@ console.log(
       children: data.children,
       rooms: data.rooms,
 
+     guests:
+    Array.isArray(data.guests)
+        ? data.guests
+        : [],
+        
+totalPersons:
+    totalPersons,
       guestNationality:
         data.guestNationality || "SN",
 
@@ -1838,8 +1877,8 @@ console.log(
           item_name:
             "Réservation hôtel — Tourizia",
 
-          item_price:
-            HOTEL_PAYTECH_PRICE,
+         item_price:
+    totalPaytechAmount,
 
           currency:
             "XOF",
@@ -1857,7 +1896,7 @@ console.log(
             process.env.PAYTECH_ENV || "test",
 
           ipn_url:
-            "https://api.tourizia.com/paytech-hotel-ipn",
+    "https://tourizia-hotel-api.onrender.com/paytech-hotel-ipn",
 
           success_url:
             "https://tourizia.com/?hotel_payment=success",
@@ -1944,7 +1983,305 @@ console.log(
     });
   }
 }
+// ============================================================
+// 💳 PAYTECH HOTEL IPN
+// ============================================================
 
+app.post(
+    "/paytech-hotel-ipn",
+    async (req, res) => {
+
+        try {
+
+            console.log(
+                "💳🔥 PAYTECH HOTEL IPN"
+            );
+
+            console.log(
+                "PAYTECH DATA:",
+                req.body
+            );
+
+
+            const {
+
+                type_event,
+
+                custom_field,
+
+                ref_command,
+
+                item_price,
+
+                final_item_price,
+
+                payment_method,
+
+                hmac_compute,
+
+                api_key_sha256,
+
+                api_secret_sha256
+
+            } = req.body;
+
+
+            // ==================================================
+            // 🔐 VÉRIFICATION PAYTECH
+            // ==================================================
+
+            const apiKey =
+                process.env.PAYTECH_API_KEY;
+
+            const apiSecret =
+                process.env.PAYTECH_API_SECRET;
+
+
+            let authenticated = false;
+
+
+            // --------------------------------------------------
+            // HMAC — méthode recommandée par PayTech
+            // --------------------------------------------------
+
+            if (hmac_compute) {
+
+                const amount =
+                    final_item_price ||
+                    item_price;
+
+                const message =
+                    `${amount}|${ref_command}|${apiKey}`;
+
+                const expectedHmac =
+                    crypto
+                        .createHmac(
+                            "sha256",
+                            apiSecret
+                        )
+                        .update(message)
+                        .digest("hex");
+
+
+                authenticated =
+                    expectedHmac ===
+                    hmac_compute;
+
+            }
+
+
+            // --------------------------------------------------
+            // SHA256 — fallback
+            // --------------------------------------------------
+
+            else {
+
+                const expectedApiKey =
+                    crypto
+                        .createHash("sha256")
+                        .update(apiKey)
+                        .digest("hex");
+
+                const expectedApiSecret =
+                    crypto
+                        .createHash("sha256")
+                        .update(apiSecret)
+                        .digest("hex");
+
+
+                authenticated =
+                    expectedApiKey ===
+                        api_key_sha256 &&
+
+                    expectedApiSecret ===
+                        api_secret_sha256;
+
+            }
+
+
+            if (!authenticated) {
+
+                console.error(
+                    "❌ PAYTECH IPN NON AUTHENTIFIÉ"
+                );
+
+                return res
+                    .status(403)
+                    .send("Forbidden");
+
+            }
+
+
+            console.log(
+                "✅ PAYTECH IPN AUTHENTIFIÉ"
+            );
+
+
+            // ==================================================
+            // ANNULATION
+            // ==================================================
+
+            if (
+                type_event ===
+                "sale_canceled"
+            ) {
+
+                console.log(
+                    "❌ PAIEMENT HÔTEL ANNULÉ:",
+                    ref_command
+                );
+
+                return res
+                    .status(200)
+                    .send("OK");
+
+            }
+
+
+            // ==================================================
+            // SUCCÈS
+            // ==================================================
+
+            if (
+                type_event !==
+                "sale_complete"
+            ) {
+
+                return res
+                    .status(200)
+                    .send("OK");
+
+            }
+
+
+            // ==================================================
+            // DÉCODER CUSTOM FIELD
+            // ==================================================
+
+            let hotelData = {};
+
+            try {
+
+                const decoded =
+                    Buffer
+                        .from(
+                            custom_field || "",
+                            "base64"
+                        )
+                        .toString("utf8");
+
+                hotelData =
+                    JSON.parse(decoded);
+
+            } catch (error) {
+
+                console.error(
+                    "❌ CUSTOM FIELD PAYTECH INVALID:",
+                    error
+                );
+
+                return res
+                    .status(400)
+                    .send("Invalid custom_field");
+
+            }
+
+
+            // ==================================================
+            // INFORMATIONS PAIEMENT
+            // ==================================================
+
+            hotelData.paymentMethod =
+                payment_method ||
+                hotelData.paymentMethod ||
+                "PayTech";
+
+            hotelData.paymentId =
+                ref_command;
+
+            hotelData.paytechReference =
+                ref_command;
+
+            hotelData.paytechAmount =
+                Number(
+                    final_item_price ||
+                    item_price ||
+                    0
+                );
+
+
+            console.log(
+                "======================================"
+            );
+
+            console.log(
+                "✅ PAYTECH HOTEL PAYMENT CONFIRMÉ"
+            );
+
+            console.log(
+                "REFERENCE:",
+                ref_command
+            );
+
+            console.log(
+                "METHOD:",
+                hotelData.paymentMethod
+            );
+
+            console.log(
+                "AMOUNT:",
+                hotelData.paytechAmount
+            );
+
+            console.log(
+                "CUSTOMER:",
+                hotelData.email
+            );
+
+            console.log(
+                "HOTEL:",
+                hotelData.hotelName
+            );
+
+            console.log(
+                "======================================"
+            );
+
+
+            // ==================================================
+            // 🔥 RÉSERVATION LITEAPI
+            // ==================================================
+
+            await processHotelAfterPayment(
+                hotelData
+            );
+
+
+            console.log(
+                "🎉 PAYTECH HOTEL FINALISÉ"
+            );
+
+
+            return res
+                .status(200)
+                .send("OK");
+
+
+        } catch (error) {
+
+            console.error(
+                "❌ PAYTECH HOTEL IPN ERROR:",
+                error
+            );
+
+            return res
+                .status(500)
+                .send("ERROR");
+
+        }
+
+    }
+);
 
 // ============================================================
 // ORANGE MONEY
