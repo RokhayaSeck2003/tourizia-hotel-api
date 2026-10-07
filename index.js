@@ -1990,6 +1990,13 @@ totalPersons:
 
 app.post(
     "/paytech-hotel-ipn",
+
+    express.urlencoded({
+        extended: true
+    }),
+
+    express.json(),
+
     async (req, res) => {
 
         try {
@@ -2003,6 +2010,17 @@ app.post(
                 req.body
             );
 
+            if (!req.body) {
+
+    console.error(
+        "❌ PAYTECH IPN: BODY VIDE"
+    );
+
+    return res
+        .status(400)
+        .send("Missing body");
+
+}
 
             const {
 
