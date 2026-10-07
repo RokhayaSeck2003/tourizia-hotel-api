@@ -2174,36 +2174,70 @@ app.post(
 
 
             // ==================================================
-            // DÉCODER CUSTOM FIELD
-            // ==================================================
+// DÉCODER CUSTOM FIELD PAYTECH
+// ==================================================
 
-            let hotelData = {};
+let hotelData = {};
 
-            try {
+try {
 
-                const decoded =
-                    Buffer
-                        .from(
-                            custom_field || "",
-                            "base64"
-                        )
-                        .toString("utf8");
+    const rawCustomField =
+        custom_field || "";
 
-                hotelData =
-                    JSON.parse(decoded);
+    // ------------------------------------------------
+    // PayTech nous envoie actuellement le JSON
+    // directement.
+    // ------------------------------------------------
 
-            } catch (error) {
+    try {
 
-                console.error(
-                    "❌ CUSTOM FIELD PAYTECH INVALID:",
-                    error
-                );
+        hotelData =
+            JSON.parse(rawCustomField);
 
-                return res
-                    .status(400)
-                    .send("Invalid custom_field");
+        console.log(
+            "✅ CUSTOM FIELD PAYTECH JSON DIRECT"
+        );
 
-            }
+    } catch (directError) {
+
+        // ------------------------------------------------
+        // Compatibilité avec un ancien format Base64
+        // ------------------------------------------------
+
+        const decoded =
+            Buffer
+                .from(
+                    rawCustomField,
+                    "base64"
+                )
+                .toString("utf8");
+
+        hotelData =
+            JSON.parse(decoded);
+
+        console.log(
+            "✅ CUSTOM FIELD PAYTECH BASE64 DÉCODÉ"
+        );
+
+    }
+
+} catch (error) {
+
+    console.error(
+        "❌ CUSTOM FIELD PAYTECH INVALID:",
+        error
+    );
+
+    console.error(
+        "CUSTOM FIELD REÇU:",
+        custom_field
+    );
+
+    return res
+        .status(400)
+        .send("Invalid custom_field");
+
+}
 
 
             // ==================================================
