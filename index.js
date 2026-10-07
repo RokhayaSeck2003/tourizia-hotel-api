@@ -42,7 +42,7 @@ const PAYTECH_API_SECRET =
     process.env.PAYTECH_API_SECRET;
 
 const PAYTECH_ENV =
-    process.env.PAYTECH_ENV || "production";
+    process.env.PAYTECH_ENV || "prod";
 
 const LITEAPI_PAYMENT_METHOD =
     process.env.LITEAPI_PAYMENT_METHOD ||
@@ -1863,14 +1863,15 @@ totalPersons:
         method: "POST",
 
         headers: {
-          "Content-Type": "application/json",
+    "Content-Type": "application/json",
+    "Accept": "application/json",
 
-          "API_KEY":
-            process.env.PAYTECH_API_KEY,
+    "API_KEY":
+        process.env.PAYTECH_API_KEY,
 
-          "API_SECRET":
-            process.env.PAYTECH_API_SECRET
-        },
+    "API_SECRET":
+        process.env.PAYTECH_API_SECRET
+},
 
         body: JSON.stringify({
 
