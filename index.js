@@ -58,7 +58,7 @@ const stripe = process.env.STRIPE_SECRET_KEY
 
 const HOTEL_STRIPE_PRICE = 1500; // USD 15
 
-const HOTEL_PAYTECH_PRICE = 8500; // XOF 8 500
+const HOTEL_PAYTECH_PRICE = 100; // XOF 8 500
 // ============================================================
 // OFFRES HÔTEL EN ATTENTE DE PAIEMENT STRIPE
 // ============================================================
