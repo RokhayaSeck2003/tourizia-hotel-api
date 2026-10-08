@@ -4887,6 +4887,144 @@ console.log("🔥 TEST ROUTE EMAIL CHARGÉE");
 console.log("🔥 PING ROUTE CHARGÉE");
 
 // ============================================================
+// 🏨 AUTOCOMPLETE HÔTEL / DESTINATION
+// ============================================================
+
+app.get(
+    "/api/hotel-autocomplete",
+    async (req, res) => {
+
+        try {
+
+            const q =
+                String(
+                    req.query.q || ""
+                ).trim();
+
+            if (q.length < 3) {
+
+                return res.json({
+                    success: true,
+                    hotels: []
+                });
+
+            }
+
+            const url =
+                `${LITEAPI_BASE_URL}/data/hotels` +
+                `?hotelName=${encodeURIComponent(q)}` +
+                `&limit=8` +
+                `&language=fr`;
+
+            console.log(
+                "🔎 HOTEL AUTOCOMPLETE:",
+                q
+            );
+
+            const response =
+                await fetch(
+                    url,
+                    {
+                        method: "GET",
+                        headers: {
+                            "X-API-Key":
+                                LITEAPI_API_KEY,
+                            "Accept":
+                                "application/json"
+                        }
+                    }
+                );
+
+            const result =
+                await response.json();
+
+            if (!response.ok) {
+
+                console.error(
+                    "❌ HOTEL AUTOCOMPLETE ERROR:",
+                    result
+                );
+
+                return res.status(
+                    response.status
+                ).json({
+                    success: false,
+                    error:
+                        result.message ||
+                        result.error ||
+                        "Erreur LiteAPI"
+                });
+
+            }
+
+            const hotels =
+                Array.isArray(result.data)
+                    ? result.data
+                    : [];
+
+            const suggestions =
+                hotels
+                    .slice(0, 8)
+                    .map(hotel => ({
+
+                        type: "hotel",
+
+                        hotelId:
+                            hotel.id || "",
+
+                        name:
+                            hotel.name || "",
+
+                        city:
+                            hotel.city || "",
+
+                        country:
+                            hotel.country || "",
+
+                        address:
+                            hotel.address || "",
+
+                        stars:
+                            hotel.stars || null,
+
+                        photo:
+                            hotel.thumbnail ||
+                            hotel.main_photo ||
+                            ""
+
+                    }));
+
+            return res.json({
+
+                success: true,
+
+                hotels:
+                    suggestions
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "❌ HOTEL AUTOCOMPLETE EXCEPTION:",
+                error
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                error:
+                    "Impossible de rechercher les hôtels."
+
+            });
+
+        }
+
+    }
+);
+
+// ============================================================
 // SERVER
 // ============================================================
 
