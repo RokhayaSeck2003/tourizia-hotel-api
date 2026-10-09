@@ -3053,6 +3053,7 @@ try {
             finalBooking
         );
 
+
     finalBooking.pdfUrl =
         documentResult.pdfUrl;
 
@@ -3080,6 +3081,14 @@ try {
 
 return finalBooking;
 }
+// ========================================================
+// 📧 NOTIFICATION ADMIN
+// ========================================================
+
+await sendHotelAdminNotification(
+    finalBooking,
+    finalBooking.confirmationNumber
+);
 
 // ============================================================
 // FIN BLOC 4
@@ -4440,6 +4449,247 @@ try {
 
     throw error;
 }
+}
+// ============================================================
+// 📧 NOTIFICATION ADMIN HÔTEL
+// ============================================================
+
+async function sendHotelAdminNotification(
+    data,
+    reference
+) {
+
+    const adminEmail =
+        "contact@tourizia.com";
+
+
+    const guestsText =
+        Array.isArray(data.guests)
+            ? data.guests
+                .map(
+                    (guest, index) =>
+                        `${index + 1}. ${guest.firstName || ""} ${guest.lastName || ""} (${guest.type || "adult"})`
+                )
+                .join("<br>")
+            : "Non renseigné";
+
+
+    const emailPayload = {
+
+        from:
+            "Tourizia <tickets@tourizia.com>",
+
+        to:
+            adminEmail,
+
+        subject:
+            `🏨 Nouvelle réservation hôtel — ${reference}`,
+
+        html: `
+
+            <div
+                style="
+                    font-family:Arial,Helvetica,sans-serif;
+                    max-width:700px;
+                    margin:auto;
+                    padding:30px;
+                    color:#17212b;
+                "
+            >
+
+                <h2>
+                    🏨 TOURIZIA — Nouvelle réservation hôtel
+                </h2>
+
+                <p
+                    style="
+                        color:#08a89f;
+                        font-weight:bold;
+                    "
+                >
+                    ✓ Paiement reçu et réservation traitée
+                </p>
+
+
+                <div
+                    style="
+                        background:#f4f8f9;
+                        padding:20px;
+                        border-radius:12px;
+                        margin:20px 0;
+                    "
+                >
+
+                    <strong>Référence :</strong>
+                    ${escapeHtml(reference)}
+
+                    <br><br>
+
+                    <strong>Client :</strong>
+                    ${escapeHtml(data.fullName || "")}
+
+                    <br>
+
+                    <strong>Email :</strong>
+                    ${escapeHtml(data.email || "")}
+
+                    <br>
+
+                    <strong>Téléphone :</strong>
+                    ${escapeHtml(data.phone || "")}
+
+                </div>
+
+
+                <div
+                    style="
+                        background:#ffffff;
+                        border:1px solid #e5e7eb;
+                        padding:20px;
+                        border-radius:12px;
+                    "
+                >
+
+                    <h3>
+                        Réservation
+                    </h3>
+
+                    <strong>Hôtel :</strong>
+                    ${escapeHtml(data.hotelName || "")}
+
+                    <br>
+
+                    <strong>Ville :</strong>
+                    ${escapeHtml(data.city || "")}
+
+                    <br>
+
+                    <strong>Chambre :</strong>
+                    ${escapeHtml(data.roomName || "")}
+
+                    <br>
+
+                    <strong>Arrivée :</strong>
+                    ${escapeHtml(
+                        formatHotelDate(
+                            data.checkIn
+                        )
+                    )}
+
+                    <br>
+
+                    <strong>Départ :</strong>
+                    ${escapeHtml(
+                        formatHotelDate(
+                            data.checkOut
+                        )
+                    )}
+
+                    <br>
+
+                    <strong>Adultes :</strong>
+                    ${Number(data.adults || 0)}
+
+                    <br>
+
+                    <strong>Enfants :</strong>
+                    ${Number(data.children || 0)}
+
+                    <br>
+
+                    <strong>Total personnes :</strong>
+                    ${Number(data.totalPersons || 0)}
+
+                    <br>
+
+                    <strong>Chambres :</strong>
+                    ${Number(data.rooms || 1)}
+
+                </div>
+
+
+                <div
+                    style="
+                        margin-top:20px;
+                        padding:20px;
+                        background:#f8fafc;
+                        border-radius:12px;
+                    "
+                >
+
+                    <h3>
+                        👥 Voyageurs
+                    </h3>
+
+                    ${guestsText}
+
+                </div>
+
+
+                <p
+                    style="
+                        margin-top:25px;
+                        color:#6c7882;
+                    "
+                >
+                    Cette notification a été générée
+                    automatiquement par Tourizia
+                    après le paiement et le traitement
+                    de la réservation hôtel.
+                </p>
+
+            </div>
+
+        `
+
+    };
+
+
+    try {
+
+        const result =
+            await resend.emails.send(
+                emailPayload
+            );
+
+
+        console.log(
+            "📧 ADMIN HOTEL NOTIFICATION:",
+            JSON.stringify(
+                result,
+                null,
+                2
+            )
+        );
+
+
+        if (result.error) {
+
+            throw new Error(
+                `Resend admin error: ${result.error.name} - ${result.error.message}`
+            );
+
+        }
+
+
+        return result;
+
+
+    } catch (error) {
+
+        console.error(
+            "❌ ADMIN HOTEL EMAIL ERROR:",
+            error
+        );
+
+        // IMPORTANT :
+        // Une erreur de notification admin
+        // ne doit jamais annuler la réservation.
+
+        return null;
+
+    }
+
 }
 // ============================================================
 // TRAITEMENT DOCUMENT APRÈS BOOK
