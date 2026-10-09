@@ -3048,11 +3048,12 @@ rooms:
 
 try {
 
+   
+
     const documentResult =
         await generateAndSendHotelConfirmation(
             finalBooking
         );
-
 
     finalBooking.pdfUrl =
         documentResult.pdfUrl;
@@ -3079,16 +3080,37 @@ try {
 
 }
 
-return finalBooking;
-}
 // ========================================================
 // 📧 NOTIFICATION ADMIN
 // ========================================================
 
-await sendHotelAdminNotification(
-    finalBooking,
-    finalBooking.confirmationNumber
-);
+try {
+
+    await sendHotelAdminNotification(
+        finalBooking,
+        finalBooking.confirmationNumber
+    );
+
+    console.log(
+        "📧 NOTIFICATION ADMIN ENVOYÉE"
+    );
+
+} catch (error) {
+
+    console.error(
+        "❌ NOTIFICATION ADMIN ERROR:",
+        error
+    );
+
+}
+
+// ========================================================
+// RETOUR FINAL
+// ========================================================
+
+return finalBooking;
+}
+// ========================================================
 
 // ============================================================
 // FIN BLOC 4
