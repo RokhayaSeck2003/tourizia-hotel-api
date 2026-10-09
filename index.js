@@ -660,37 +660,64 @@ async function searchHotelOffers(data) {
 
     const requestBody = {
 
-        checkin:
-            data.checkIn,
+    checkin:
+        data.checkIn,
 
-        checkout:
-            data.checkOut,
+    checkout:
+        data.checkOut,
 
-        currency:
-            "EUR",
+    currency:
+        "EUR",
 
-        guestNationality:
-            data.guestNationality ||
-            "SN",
+    guestNationality:
+        data.guestNationality || "SN",
 
-        occupancies,
+    occupancies,
 
-        cityName:
-            data.city,
+    roomMapping:
+        true,
 
-        countryCode:
-            data.countryCode,
+    maxRatesPerHotel:
+        1,
 
-        roomMapping:
-            true,
+    includeHotelData:
+        true
 
-        maxRatesPerHotel:
-            1,
+};
 
-        includeHotelData:
-            true
 
-    };
+// ========================================================
+// 🏨 RECHERCHE PAR HÔTEL OU PAR VILLE
+// ========================================================
+
+if (data.hotelId) {
+
+    // Client a choisi un hôtel précis
+    requestBody.hotelIds = [
+        data.hotelId
+    ];
+
+    console.log(
+        "🏨 RECHERCHE HÔTEL PAR ID:",
+        data.hotelId
+    );
+
+} else {
+
+    // Client a choisi une destination / ville
+    requestBody.cityName =
+        data.city;
+
+    requestBody.countryCode =
+        data.countryCode;
+
+    console.log(
+        "📍 RECHERCHE HÔTEL PAR VILLE:",
+        data.city,
+        data.countryCode
+    );
+
+}
 
     console.log(
         "🏨 LITEAPI RATES REQUEST:"
