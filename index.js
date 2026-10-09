@@ -5186,207 +5186,155 @@ console.log("🔥 TEST ROUTE EMAIL CHARGÉE");
 console.log("🔥 PING ROUTE CHARGÉE");
 
 // ============================================================
-// 🏨 AUTOCOMPLETE HÔTEL / DESTINATION
+// 🏨 AUTOCOMPLETE HÔTELS TOURIZIA
+// Recherche par ville + code pays avec LiteAPI
 // ============================================================
 
-app.get(
-    "/api/hotel-autocomplete",
-    async (req, res) => {
+app.get("/api/hotel-autocomplete", async (req, res) => {
+    try {
+        const cityName = String(
+            req.query.cityName || ""
+        ).trim();
 
-        try {
+        const countryCode = String(
+            req.query.countryCode || ""
+        ).trim().toUpperCase();
 
-            const q =
-    String(
-        req.query.q || ""
-    ).trim();
+        // Les deux paramètres sont obligatoires.
+        // Exemple : cityName=Paris&countryCode=FR
 
-const countryCode =
-    String(
-        req.query.countryCode || ""
-    )
-    .trim()
-    .toUpperCase();
-
-if (q.length < 3) {
-
-    return res.json({
-        success: true,
-        hotels: []
-    });
-
-}
-
-
-// ==================================================
-// 🔎 CONSTRUCTION URL LITEAPI
-// ==================================================
-
-const hotelUrl =
-    new URL(
-        `${LITEAPI_BASE_URL}/data/hotels`
-    );
-
-
-// Nombre de résultats
-hotelUrl.searchParams.set(
-    "limit",
-    "8"
-);
-
-
-// ==================================================
-// 🌍 RECHERCHE PAR PAYS
-// ==================================================
-
-if (
-    /^[A-Z]{2}$/.test(
-        countryCode
-    )
-) {
-
-    // Exemple :
-    // Sénégal → SN
-    //
-    // On demande à LiteAPI
-    // les hôtels du pays.
-
-    hotelUrl.searchParams.set(
-        "countryCode",
-        countryCode
-    );
-
-} else {
-
-    // ==================================================
-    // 🏨 RECHERCHE CLASSIQUE PAR NOM
-    // ==================================================
-
-    hotelUrl.searchParams.set(
-        "hotelName",
-        q
-    );
-
-}
-
-
-const url =
-    hotelUrl.toString();
-
-
-console.log(
-    "🔎 HOTEL AUTOCOMPLETE:",
-    countryCode
-        ? `pays=${countryCode}`
-        : `nom=${q}`
-);
-
-            console.log(
-                "🔎 HOTEL AUTOCOMPLETE:",
-                q
-            );
-
-            const response =
-                await fetch(
-                    url,
-                    {
-                        method: "GET",
-                        headers: {
-                            "X-API-Key":
-                                LITEAPI_API_KEY,
-                            "Accept":
-                                "application/json"
-                        }
-                    }
-                );
-
-            const result =
-                await response.json();
-
-            if (!response.ok) {
-
-                console.error(
-                    "❌ HOTEL AUTOCOMPLETE ERROR:",
-                    result
-                );
-
-                return res.status(
-                    response.status
-                ).json({
-                    success: false,
-                    error:
-                        result.message ||
-                        result.error ||
-                        "Erreur LiteAPI"
-                });
-
-            }
-
-            const hotels =
-                Array.isArray(result.data)
-                    ? result.data
-                    : [];
-
-            const suggestions =
-                hotels
-                    .slice(0, 8)
-                    .map(hotel => ({
-
-                        type: "hotel",
-
-                        hotelId:
-                            hotel.id || "",
-
-                        name:
-                            hotel.name || "",
-
-                        city:
-                            hotel.city || "",
-
-                        country:
-                            hotel.country || "",
-
-                        address:
-                            hotel.address || "",
-
-                        stars:
-                            hotel.stars || null,
-
-                        photo:
-                            hotel.thumbnail ||
-                            hotel.main_photo ||
-                            ""
-
-                    }));
-
+        if (
+            cityName.length < 2 ||
+            !/^[A-Z]{2}$/.test(countryCode)
+        ) {
             return res.json({
-
                 success: true,
-
-                hotels:
-                    suggestions
-
+                hotels: []
             });
-
-        } catch (error) {
-
-            console.error(
-                "❌ HOTEL AUTOCOMPLETE EXCEPTION:",
-                error
-            );
-
-            return res.status(500).json({
-
-                success: false,
-
-                error:
-                    "Impossible de rechercher les hôtels."
-
-            });
-
         }
 
+        // ==================================================
+        // 🔎 REQUÊTE LITEAPI
+        // ==================================================
+
+        const hotelUrl = new URL(
+            `${LITEAPI_BASE_URL}/data/hotels`
+        );
+
+        hotelUrl.searchParams.set(
+            "cityName",
+            cityName
+        );
+
+        hotelUrl.searchParams.set(
+            "countryCode",
+            countryCode
+        );
+
+        hotelUrl.searchParams.set(
+            "limit",
+            "8"
+        );
+
+        console.log(
+            "🏨 HOTEL AUTOCOMPLETE:",
+            cityName,
+            countryCode
+        );
+
+        const response = await fetch(
+            hotelUrl.toString(),
+            {
+                method: "GET",
+                headers: {
+                    "X-API-Key": LITEAPI_API_KEY,
+                    "Accept": "application/json"
+                }
+            }
+        );
+
+        const result = await response.json();
+
+        // ==================================================
+        // ❌ ERREUR LITEAPI
+        // ==================================================
+
+        if (!response.ok) {
+            console.error(
+                "❌ LITEAPI HOTEL AUTOCOMPLETE:",
+                result
+            );
+
+            return res.status(response.status).json({
+                success: false,
+                error:
+                    result.message ||
+                    result.error ||
+                    result.description ||
+                    "Erreur LiteAPI"
+            });
+        }
+
+        // ==================================================
+        // 🏨 NORMALISATION DES RÉSULTATS
+        // ==================================================
+
+        const hotels = Array.isArray(result.data)
+            ? result.data
+            : [];
+
+        const suggestions = hotels
+            .slice(0, 8)
+            .map(hotel => ({
+                type: "hotel",
+
+                hotelId:
+                    hotel.id || "",
+
+                name:
+                    hotel.name || "",
+
+                city:
+                    hotel.city ||
+                    hotel.city_name ||
+                    cityName,
+
+                country:
+                    hotel.country ||
+                    hotel.country_code ||
+                    countryCode,
+
+                address:
+                    hotel.address || "",
+
+                stars:
+                    hotel.stars ||
+                    hotel.rating ||
+                    null,
+
+                photo:
+                    hotel.thumbnail ||
+                    hotel.main_photo ||
+                    ""
+            }));
+
+        return res.json({
+            success: true,
+            hotels: suggestions
+        });
+
+    } catch (error) {
+        console.error(
+            "❌ HOTEL AUTOCOMPLETE EXCEPTION:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            error: "Impossible de rechercher les hôtels."
+        });
     }
-);
+});
 
 // ============================================================
 // SERVER
