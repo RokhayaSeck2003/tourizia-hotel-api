@@ -5174,24 +5174,89 @@ app.get(
         try {
 
             const q =
-                String(
-                    req.query.q || ""
-                ).trim();
+    String(
+        req.query.q || ""
+    ).trim();
 
-            if (q.length < 3) {
+const countryCode =
+    String(
+        req.query.countryCode || ""
+    )
+    .trim()
+    .toUpperCase();
 
-                return res.json({
-                    success: true,
-                    hotels: []
-                });
+if (q.length < 3) {
 
-            }
+    return res.json({
+        success: true,
+        hotels: []
+    });
 
-            const url =
-                `${LITEAPI_BASE_URL}/data/hotels` +
-                `?hotelName=${encodeURIComponent(q)}` +
-                `&limit=8` +
-                `&language=fr`;
+}
+
+
+// ==================================================
+// 🔎 CONSTRUCTION URL LITEAPI
+// ==================================================
+
+const hotelUrl =
+    new URL(
+        `${LITEAPI_BASE_URL}/data/hotels`
+    );
+
+
+// Nombre de résultats
+hotelUrl.searchParams.set(
+    "limit",
+    "8"
+);
+
+
+// ==================================================
+// 🌍 RECHERCHE PAR PAYS
+// ==================================================
+
+if (
+    /^[A-Z]{2}$/.test(
+        countryCode
+    )
+) {
+
+    // Exemple :
+    // Sénégal → SN
+    //
+    // On demande à LiteAPI
+    // les hôtels du pays.
+
+    hotelUrl.searchParams.set(
+        "countryCode",
+        countryCode
+    );
+
+} else {
+
+    // ==================================================
+    // 🏨 RECHERCHE CLASSIQUE PAR NOM
+    // ==================================================
+
+    hotelUrl.searchParams.set(
+        "hotelName",
+        q
+    );
+
+}
+
+
+const url =
+    hotelUrl.toString();
+
+
+console.log(
+    "🔎 HOTEL AUTOCOMPLETE:",
+    countryCode
+        ? `pays=${countryCode}`
+        : `nom=${q}`
+);
 
             console.log(
                 "🔎 HOTEL AUTOCOMPLETE:",
