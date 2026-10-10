@@ -13,6 +13,7 @@ import path from "path";
 import { Resend } from "resend";
 import { v2 as cloudinary } from "cloudinary";
 import puppeteer from "puppeteer-core";
+import { MongoClient } from "mongodb";
 // ============================================================
 // 💳 PAYTECH HOTEL IPN
 // ============================================================
@@ -20,6 +21,405 @@ import puppeteer from "puppeteer-core";
 import crypto from "crypto";
 
 dotenv.config();
+
+// ============================================================
+// 🗄️ TOURIZIA — MONGODB
+// ============================================================
+
+const MONGODB_URI =
+    process.env.MONGODB_URI;
+
+const MONGODB_DB =
+    process.env.MONGODB_DB ||
+    "tourizia";
+
+let mongoClient = null;
+let mongoDb = null;
+let hotelTransactions = null;
+
+
+// ============================================================
+// CONNEXION MONGODB
+// ============================================================
+
+async function connectMongoDB() {
+
+    if (!MONGODB_URI) {
+
+        console.error(
+            "❌ MONGODB_URI manquant"
+        );
+
+        return;
+    }
+
+    try {
+
+        mongoClient =
+            new MongoClient(
+                MONGODB_URI
+            );
+
+        await mongoClient.connect();
+
+        mongoDb =
+            mongoClient.db(
+                MONGODB_DB
+            );
+
+        hotelTransactions =
+            mongoDb.collection(
+                "hotel_transactions"
+            );
+
+        await hotelTransactions.createIndex(
+            {
+                transactionId: 1
+            },
+            {
+                unique: true
+            }
+        );
+
+        await hotelTransactions.createIndex({
+            paymentId: 1
+        });
+
+        await hotelTransactions.createIndex({
+            status: 1
+        });
+
+        await hotelTransactions.createIndex({
+            createdAt: -1
+        });
+
+        console.log(
+            "✅ MongoDB connecté — Tourizia"
+        );
+
+    } catch (error) {
+
+        console.error(
+            "❌ MongoDB CONNECTION ERROR:",
+            error
+        );
+
+    }
+
+}
+// ============================================================
+// 🧾 TOURIZIA — STATUTS TRANSACTIONS
+// ============================================================
+
+const HOTEL_TRANSACTION_STATUS = {
+
+    PAYMENT_PENDING:
+        "PAYMENT_PENDING",
+
+    PAID:
+        "PAID",
+
+    SEARCHING:
+        "SEARCHING",
+
+    OFFER_FOUND:
+        "OFFER_FOUND",
+
+    PREBOOKED:
+        "PREBOOKED",
+
+    BOOKED:
+        "BOOKED",
+
+    CONFIRMED:
+        "CONFIRMED",
+
+    MANUAL_SEARCH_REQUIRED:
+        "MANUAL_SEARCH_REQUIRED",
+
+    ERROR:
+        "ERROR"
+
+};
+
+
+// ============================================================
+// 🔑 GÉNÉRER ID TRANSACTION
+// ============================================================
+
+function generateHotelTransactionId() {
+
+    return (
+        "TZTX-" +
+        Date.now().toString(36).toUpperCase() +
+        "-" +
+        Math.random()
+            .toString(36)
+            .slice(2, 8)
+            .toUpperCase()
+    );
+
+}
+
+
+// ============================================================
+// 🧾 CRÉER TRANSACTION
+// ============================================================
+
+async function createHotelTransaction(data) {
+
+    if (!hotelTransactions) {
+
+        console.warn(
+            "⚠️ MongoDB indisponible — transaction non enregistrée"
+        );
+
+        return null;
+    }
+
+    const transactionId =
+        generateHotelTransactionId();
+
+    const now =
+        new Date();
+
+    const transaction = {
+
+        transactionId,
+
+        type:
+            "hotel",
+
+        status:
+            HOTEL_TRANSACTION_STATUS.PAYMENT_PENDING,
+
+        payment: {
+
+            method:
+                data.paymentMethod || null,
+
+            paymentId:
+                null,
+
+            stripeSessionId:
+                null,
+
+            paytechReference:
+                null,
+
+            amount:
+                null,
+
+            currency:
+                null
+
+        },
+
+        customer: {
+
+            fullName:
+                data.fullName || "",
+
+            email:
+                data.email || "",
+
+            phone:
+                data.phone || ""
+
+        },
+
+        request: {
+
+            city:
+                data.city || "",
+
+            countryCode:
+                data.countryCode || "",
+
+            checkIn:
+                data.checkIn || "",
+
+            checkOut:
+                data.checkOut || "",
+
+            adults:
+                Number(data.adults || 0),
+
+            children:
+                Number(data.children || 0),
+
+            rooms:
+                Number(data.rooms || 1),
+
+            guestNationality:
+                data.guestNationality || "SN",
+
+            guests:
+                Array.isArray(data.guests)
+                    ? data.guests
+                    : []
+
+        },
+
+        provider: {
+
+            name:
+                "LiteAPI",
+
+            hotelId:
+                null,
+
+            hotelName:
+                null,
+
+            roomName:
+                null,
+
+            offerId:
+                null,
+
+            prebookId:
+                null,
+
+            bookingId:
+                null,
+
+            confirmationNumber:
+                null,
+
+            price:
+                null,
+
+            currency:
+                null
+
+        },
+
+        error: null,
+
+        history: [
+
+            {
+
+                status:
+                    HOTEL_TRANSACTION_STATUS.PAYMENT_PENDING,
+
+                at:
+                    now
+
+            }
+
+        ],
+
+        createdAt:
+            now,
+
+        updatedAt:
+            now
+
+    };
+
+    await hotelTransactions.insertOne(
+        transaction
+    );
+
+    console.log(
+        "🧾 TRANSACTION CRÉÉE:",
+        transactionId
+    );
+
+    return transactionId;
+
+}
+async function updateHotelTransactionStatus(
+    transactionId,
+    status,
+    extra = {}
+) {
+
+    if (
+        !hotelTransactions ||
+        !transactionId
+    ) {
+        return;
+    }
+
+    const now =
+        new Date();
+
+    const update = {
+
+        $set: {
+
+            status,
+
+            updatedAt:
+                now,
+
+            ...extra
+
+        },
+
+        $push: {
+
+            history: {
+
+                status,
+
+                at:
+                    now
+
+            }
+
+        }
+
+    };
+
+    await hotelTransactions.updateOne(
+        {
+            transactionId
+        },
+        update
+    );
+
+    console.log(
+        `📊 TRANSACTION ${transactionId} → ${status}`
+    );
+
+}
+// ============================================================
+// 🔄 MISE À JOUR DES INFORMATIONS TRANSACTION
+// ============================================================
+
+async function updateHotelTransaction(
+    transactionId,
+    fields = {}
+) {
+
+    if (
+        !hotelTransactions ||
+        !transactionId
+    ) {
+        return;
+    }
+
+    await hotelTransactions.updateOne(
+        {
+            transactionId
+        },
+        {
+            $set: {
+
+                ...fields,
+
+                updatedAt:
+                    new Date()
+
+            }
+        }
+    );
+
+}
 
 const app = express();
 
@@ -189,6 +589,32 @@ app.post(
 
         const session =
             event.data.object;
+            const metadata =
+    session.metadata || {};
+
+const transactionId =
+    metadata.transactionId || null;
+
+    await updateHotelTransactionStatus(
+    transactionId,
+    HOTEL_TRANSACTION_STATUS.PAID,
+    {
+        "payment.paymentId":
+            session.payment_intent ||
+            session.id,
+
+        "payment.stripeSessionId":
+            session.id,
+
+        "payment.amount":
+            session.amount_total
+                ? session.amount_total / 100
+                : null,
+
+        "payment.currency":
+            session.currency || "usd"
+    }
+);
 
         // ----------------------------------------------------
         // VÉRIFICATION PAIEMENT
@@ -210,8 +636,8 @@ app.post(
 
         }
 
-        const metadata =
-            session.metadata || {};
+        
+
 
         // ----------------------------------------------------
         // VÉRIFICATION TYPE
@@ -291,6 +717,9 @@ const pendingPayment =
 
     paymentMethod:
         "stripe",
+
+        transactionId:
+    transactionId,
 
     email:
         metadata.email ||
@@ -1519,6 +1948,16 @@ if (validation) {
 
 const data = req.body;
 
+const transactionId =
+    await createHotelTransaction({
+
+        ...data,
+
+        paymentMethod:
+            "stripe"
+
+    });
+
 
 // ========================================================
 // 👥 NOMBRE TOTAL DE VOYAGEURS
@@ -1669,6 +2108,9 @@ console.log(
 
         paymentMethod: "stripe",
 
+        transactionId:
+    transactionId || "",
+
         fullName: data.fullName || "",
         email: data.email || "",
 
@@ -1741,6 +2183,15 @@ if (validation) {
 }
 
 const data = req.body;
+const transactionId =
+    await createHotelTransaction({
+
+        ...data,
+
+        paymentMethod:
+            targetPayment
+
+    });
 // ========================================================
 // 👥 TOTAL VOYAGEURS
 // ========================================================
@@ -1799,6 +2250,10 @@ const totalPaytechAmount =
       type: "hotel",
 
       paymentMethod: targetPayment,
+
+      transactionId:
+        transactionId || "",
+
 
       fullName: data.fullName || "",
       email: data.email || "",
@@ -2214,26 +2669,82 @@ try {
 
 
             // ==================================================
-            // INFORMATIONS PAIEMENT
-            // ==================================================
+// INFORMATIONS PAIEMENT
+// ==================================================
 
-            hotelData.paymentMethod =
-                payment_method ||
-                hotelData.paymentMethod ||
-                "PayTech";
+hotelData.paymentMethod =
+    payment_method ||
+    hotelData.paymentMethod ||
+    "PayTech";
 
-            hotelData.paymentId =
-                ref_command;
+hotelData.paymentId =
+    ref_command;
 
-            hotelData.paytechReference =
-                ref_command;
+hotelData.paytechReference =
+    ref_command;
 
-            hotelData.paytechAmount =
-                Number(
-                    final_item_price ||
-                    item_price ||
-                    0
-                );
+hotelData.paytechAmount =
+    Number(
+        final_item_price ||
+        item_price ||
+        0
+    );
+
+// ==================================================
+// 🧾 TRANSACTION TOURIZIA
+// ==================================================
+
+const transactionId =
+    hotelData.transactionId || null;
+
+if (!transactionId) {
+
+    console.error(
+        "❌ TRANSACTION ID MANQUANT DANS PAYTECH CUSTOM_FIELD"
+    );
+
+    return res
+        .status(400)
+        .send("Transaction ID missing");
+
+}
+
+console.log(
+    "🧾 TRANSACTION ID:",
+    transactionId
+);
+
+// ==================================================
+// 💰 TRANSACTION → PAID
+// ==================================================
+
+await updateHotelTransactionStatus(
+
+    transactionId,
+
+    HOTEL_TRANSACTION_STATUS.PAID,
+
+    {
+
+        "payment.paymentId":
+            ref_command,
+
+        "payment.paytechReference":
+            ref_command,
+
+        "payment.amount":
+            Number(
+                final_item_price ||
+                item_price ||
+                0
+            ),
+
+        "payment.currency":
+            "XOF"
+
+    }
+
+);
 
 
             console.log(
@@ -3055,9 +3566,14 @@ async function processHotelAfterPayment(
     console.log(
         "======================================"
     );
+    await updateHotelTransactionStatus(
+    data.transactionId,
+    HOTEL_TRANSACTION_STATUS.SEARCHING
+);
 
     let selectedOffer = null;
     let prebookResult = null;
+  
 
     // ========================================================
 // 🏨 APRÈS PAIEMENT UNIQUEMENT
@@ -3085,11 +3601,21 @@ try {
         error
     );
 
+
     await sendHotelManualSearchNotification(
         data,
         error?.message ||
             "Aucune offre disponible ou réservable après paiement."
     );
+    await updateHotelTransactionStatus(
+    data.transactionId,
+    HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+    {
+        error:
+            error?.message ||
+            "Aucune offre disponible ou réservable après paiement."
+    }
+);
 
     throw error;
 
@@ -3122,54 +3648,134 @@ selectedOffer =
 prebookResult =
     fresh.prebook;
 
+
 console.log(
     "✅ OFFRE TROUVÉE APRÈS PAIEMENT:",
     selectedOffer.offerId
 );
 
+// ========================================================
+// 🏨 TRANSACTION → OFFER_FOUND
+// ========================================================
 
+await updateHotelTransactionStatus(
 
-    // ========================================================
-    // RÉCUPÉRER LE PREBOOK ID
-    // ========================================================
+    data.transactionId,
 
-    /*
-     * Selon la réponse LiteAPI,
-     * le prebookId peut être directement
-     * dans la réponse ou dans une structure
-     * imbriquée.
-     */
+    HOTEL_TRANSACTION_STATUS.OFFER_FOUND,
 
-    const prebookId =
-        prebookResult.prebookId ||
-        prebookResult.data?.prebookId ||
-        prebookResult.id ||
-        prebookResult.data?.id;
+    {
 
-    if (!prebookId) {
+        "provider.hotelId":
+            selectedOffer.hotelId || null,
 
-        console.error(
-            "❌ PREBOOK ID INTROUVABLE:"
-        );
+        "provider.hotelName":
+            selectedOffer.hotelName || null,
 
-        console.error(
-            JSON.stringify(
-                prebookResult,
-                null,
-                2
-            )
-        );
+        "provider.roomName":
+            selectedOffer.roomName || null,
 
-        throw new Error(
-            "LiteAPI n'a pas retourné de prebookId"
-        );
+        "provider.offerId":
+            selectedOffer.offerId || null,
+
+        "provider.price":
+            selectedOffer.price || null,
+
+        "provider.currency":
+            selectedOffer.currency || null
 
     }
 
-    console.log(
-        "✅ PREBOOK ID:",
-        prebookId
+);
+
+
+
+    // ========================================================
+// RÉCUPÉRER LE PREBOOK ID
+// ========================================================
+
+/*
+ * Selon la réponse LiteAPI,
+ * le prebookId peut être directement
+ * dans la réponse ou dans une structure
+ * imbriquée.
+ */
+
+const prebookId =
+    prebookResult.prebookId ||
+    prebookResult.data?.prebookId ||
+    prebookResult.id ||
+    prebookResult.data?.id;
+
+
+// ========================================================
+// 🔐 VÉRIFICATION PREBOOK ID
+// ========================================================
+
+if (!prebookId) {
+
+    console.error(
+        "❌ PREBOOK ID INTROUVABLE:"
     );
+
+    console.error(
+        JSON.stringify(
+            prebookResult,
+            null,
+            2
+        )
+    );
+
+    await updateHotelTransactionStatus(
+
+        data.transactionId,
+
+        HOTEL_TRANSACTION_STATUS.ERROR,
+
+        {
+
+            error:
+                "LiteAPI n'a pas retourné de prebookId"
+
+        }
+
+    );
+
+    throw new Error(
+        "LiteAPI n'a pas retourné de prebookId"
+    );
+
+}
+
+
+// ========================================================
+// ✅ PREBOOK ID TROUVÉ
+// ========================================================
+
+console.log(
+    "✅ PREBOOK ID:",
+    prebookId
+);
+
+
+// ========================================================
+// 🧾 TRANSACTION → PREBOOKED
+// ========================================================
+
+await updateHotelTransactionStatus(
+
+    data.transactionId,
+
+    HOTEL_TRANSACTION_STATUS.PREBOOKED,
+
+    {
+
+        "provider.prebookId":
+            prebookId
+
+    }
+
+);
 
     // ========================================================
     // ÉTAPE 3
@@ -3198,6 +3804,20 @@ console.log(
         bookingResult.data?.confirmationNumber ||
         bookingResult.booking?.confirmationNumber ||
         bookingId;
+
+        await updateHotelTransactionStatus(
+    data.transactionId,
+    HOTEL_TRANSACTION_STATUS.BOOKED,
+    {
+
+        "provider.bookingId":
+            bookingId,
+
+        "provider.confirmationNumber":
+            confirmationNumber
+
+    }
+);
 
     // ========================================================
     // RÉSULTAT FINAL
@@ -3342,6 +3962,22 @@ try {
         await generateAndSendHotelConfirmation(
             finalBooking
         );
+        await updateHotelTransactionStatus(
+    data.transactionId,
+    HOTEL_TRANSACTION_STATUS.CONFIRMED,
+    {
+
+        "provider.confirmationNumber":
+            finalBooking.confirmationNumber,
+
+        "provider.bookingId":
+            finalBooking.bookingId,
+
+        pdfUrl:
+            documentResult.pdfUrl || null
+
+    }
+);
 
     finalBooking.pdfUrl =
         documentResult.pdfUrl;
@@ -5628,7 +6264,13 @@ app.get("/api/hotel-autocomplete", async (req, res) => {
 // SERVER
 // ============================================================
 
+async function startServer() {
 
+    await connectMongoDB();
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+}
+
+startServer();
