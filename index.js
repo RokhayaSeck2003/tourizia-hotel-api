@@ -282,9 +282,6 @@ const pendingPayment =
         ? pendingHotelPayments.get(offerToken)
         : null;
 
-const storedOffer =
-    pendingPayment?.offer || null;
-
         const hotelData = {
 
     paymentId,
@@ -349,37 +346,24 @@ const storedOffer =
     
 
     // -----------------------------------------------
-    // OFFRE LITEAPI PRÉ-SÉLECTIONNÉE
-    // -----------------------------------------------
+// 🔐 AUCUNE OFFRE AVANT PAIEMENT
+// -----------------------------------------------
+// LiteAPI sera interrogé uniquement
+// après confirmation du paiement.
 
-    hotelId:
-        storedOffer?.hotelId ||
-        metadata.hotelId,
+hotelId: null,
 
-    hotelName:
-        storedOffer?.hotelName ||
-        metadata.hotelName,
+hotelName: null,
 
-    roomName:
-        storedOffer?.roomName ||
-        metadata.roomName,
-        refundable:
-    storedOffer?.refundable ||
-    null,
+roomName: null,
 
-    offerId:
-        storedOffer?.offerId ||
-        null,
+refundable: null,
 
-    providerPrice:
-        storedOffer?.price ||
-        metadata.providerPrice,
+offerId: null,
 
-    providerCurrency:
-        storedOffer?.currency ||
-        metadata.providerCurrency ||
-        "EUR"
+providerPrice: null,
 
+providerCurrency: null
 
         };
 
@@ -1620,29 +1604,30 @@ for (
     // Le backend recherche lui-même une offre valide.
     // --------------------------------------------------------
 
-  const selectedOfferResult = await findPrebookableOffer(data);
+  // --------------------------------------------------------
+// 🔐 PAIEMENT D'ABORD
+// --------------------------------------------------------
+// AUCUNE recherche LiteAPI ici.
+// La disponibilité sera vérifiée uniquement
+// après confirmation du paiement.
+// --------------------------------------------------------
 
-if (!selectedOfferResult || !selectedOfferResult.offer) {
-  return res.status(404).json({
-    error: "Aucune chambre disponible ou réservable."
-  });
-}
-
-const selectedOffer = selectedOfferResult.offer;
-
-console.log(
-  "✅ Offre sélectionnée :",
-  selectedOffer.offerId
-);
 const offerToken =
-  "HOTEL-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+  "HOTEL-" +
+  Date.now() +
+  "-" +
+  Math.random().toString(36).slice(2, 10);
 
 pendingHotelPayments.set(
   offerToken,
   {
-    offer: selectedOffer,
     data
   }
+);
+
+console.log(
+  "🔐 DONNÉES HÔTEL STOCKÉES AVANT PAIEMENT:",
+  offerToken
 );
 
 console.log(
@@ -1701,17 +1686,9 @@ console.log(
           data.guestNationality || "SN",
 
         // Offre sélectionnée côté serveur
-        hotelId: selectedOffer.hotelId || "",
-hotelName: selectedOffer.hotelName || "",
-roomName: selectedOffer.roomName || "",
-
-offerToken: offerToken,
-
-providerPrice:
-    String(selectedOffer.price || ""),
-
-providerCurrency:
-    selectedOffer.currency || "EUR"
+       // 🔐 Token permettant de retrouver
+// les données après paiement
+offerToken: offerToken
       }
     });
 
@@ -1801,20 +1778,6 @@ const totalPaytechAmount =
     // Le frontend n'envoie PAS offerId.
     // --------------------------------------------------------
 
-   const selectedOfferResult = await findPrebookableOffer(data);
-
-if (!selectedOfferResult || !selectedOfferResult.offer) {
-  return res.status(404).json({
-    error: "Aucune chambre disponible ou réservable."
-  });
-}
-
-const selectedOffer = selectedOfferResult.offer;
-
-console.log(
-  "✅ Offre PayTech sélectionnée :",
-  selectedOffer.offerId
-);
 
 
     // --------------------------------------------------------
@@ -1860,23 +1823,6 @@ totalPersons:
       guestNationality:
         data.guestNationality || "SN",
 
-      // Offre LiteAPI
-      offerId: selectedOffer.offerId,
-
-      hotelId:
-        selectedOffer.hotelId || "",
-
-      hotelName:
-        selectedOffer.hotelName || "",
-
-      roomName:
-        selectedOffer.roomName || "",
-
-      providerPrice:
-        selectedOffer.price || "",
-
-      providerCurrency:
-        selectedOffer.currency || "EUR"
     };
 
 
@@ -2724,6 +2670,360 @@ for (
 // 6. Retourner confirmation
 //
 // ============================================================
+// 📧 PAIEMENT REÇU — RECHERCHE MANUELLE ADMIN
+// ============================================================
+
+async function sendHotelManualSearchNotification(
+    data,
+    reason
+) {
+
+    const adminEmail =
+        "contact@tourizia.com";
+
+    const guestsText =
+        Array.isArray(data.guests) &&
+        data.guests.length
+            ? data.guests
+                .map(
+                    (guest, index) =>
+                        `${index + 1}. ${
+                            guest.firstName || ""
+                        } ${
+                            guest.lastName || ""
+                        } (${
+                            guest.type || "adult"
+                        })`
+                )
+                .join("<br>")
+            : "Aucun voyageur renseigné";
+
+    const emailPayload = {
+
+        from:
+            "Tourizia <tickets@tourizia.com>",
+
+        to:
+            adminEmail,
+
+        subject:
+            `⚠️ PAIEMENT HÔTEL REÇU — RECHERCHE MANUELLE — ${
+                data.paymentId || "SANS RÉFÉRENCE"
+            }`,
+
+        html: `
+
+            <div
+                style="
+                    font-family:Arial,Helvetica,sans-serif;
+                    max-width:750px;
+                    margin:auto;
+                    padding:30px;
+                    color:#17212b;
+                "
+            >
+
+                <h2>
+                    ⚠️ TOURIZIA — Recherche manuelle nécessaire
+                </h2>
+
+                <p
+                    style="
+                        background:#fff7ed;
+                        color:#c2410c;
+                        padding:15px;
+                        border-radius:10px;
+                        font-weight:bold;
+                    "
+                >
+                    Paiement reçu, mais aucune offre
+                    LiteAPI n'a pu être trouvée ou réservée.
+                </p>
+
+                <p>
+                    Le client doit maintenant être traité
+                    manuellement par l'administration Tourizia.
+                </p>
+
+
+                <div
+                    style="
+                        background:#f4f8f9;
+                        padding:20px;
+                        border-radius:12px;
+                        margin:20px 0;
+                    "
+                >
+
+                    <h3>
+                        💳 Paiement
+                    </h3>
+
+                    <strong>ID paiement :</strong>
+                    ${escapeHtml(
+                        data.paymentId || ""
+                    )}
+
+                    <br>
+
+                    <strong>Méthode :</strong>
+                    ${escapeHtml(
+                        data.paymentMethod || ""
+                    )}
+
+                    <br>
+
+                    <strong>Référence PayTech :</strong>
+                    ${escapeHtml(
+                        data.paytechReference || ""
+                    )}
+
+                    <br>
+
+                    <strong>Montant PayTech :</strong>
+                    ${Number(
+                        data.paytechAmount || 0
+                    )}
+
+                </div>
+
+
+                <div
+                    style="
+                        background:#ffffff;
+                        border:1px solid #e5e7eb;
+                        padding:20px;
+                        border-radius:12px;
+                    "
+                >
+
+                    <h3>
+                        👤 Client
+                    </h3>
+
+                    <strong>Nom :</strong>
+                    ${escapeHtml(
+                        data.fullName || ""
+                    )}
+
+                    <br>
+
+                    <strong>Email :</strong>
+                    ${escapeHtml(
+                        data.email || ""
+                    )}
+
+                    <br>
+
+                    <strong>Téléphone :</strong>
+                    ${escapeHtml(
+                        data.phone || ""
+                    )}
+
+                </div>
+
+
+                <div
+                    style="
+                        margin-top:20px;
+                        background:#ffffff;
+                        border:1px solid #e5e7eb;
+                        padding:20px;
+                        border-radius:12px;
+                    "
+                >
+
+                    <h3>
+                        🏨 Demande hôtel
+                    </h3>
+
+                    <strong>Hôtel demandé :</strong>
+                    ${escapeHtml(
+                        data.hotelName || "Non renseigné"
+                    )}
+
+                    <br>
+
+                    <strong>Chambre demandée :</strong>
+                    ${escapeHtml(
+                        data.roomName || "Non renseignée"
+                    )}
+
+                    <br>
+
+                    <strong>Ville :</strong>
+                    ${escapeHtml(
+                        data.city || ""
+                    )}
+
+                    <br>
+
+                    <strong>Pays :</strong>
+                    ${escapeHtml(
+                        data.countryCode || ""
+                    )}
+
+                    <br>
+
+                    <strong>Arrivée :</strong>
+                    ${escapeHtml(
+                        formatHotelDate(
+                            data.checkIn
+                        )
+                    )}
+
+                    <br>
+
+                    <strong>Départ :</strong>
+                    ${escapeHtml(
+                        formatHotelDate(
+                            data.checkOut
+                        )
+                    )}
+
+                    <br>
+
+                    <strong>Adultes :</strong>
+                    ${Number(
+                        data.adults || 0
+                    )}
+
+                    <br>
+
+                    <strong>Enfants :</strong>
+                    ${Number(
+                        data.children || 0
+                    )}
+
+                    <br>
+
+                    <strong>Chambres :</strong>
+                    ${Number(
+                        data.rooms || 1
+                    )}
+
+                    <br>
+
+                    <strong>Nationalité :</strong>
+                    ${escapeHtml(
+                        data.guestNationality || ""
+                    )}
+
+                </div>
+
+
+                <div
+                    style="
+                        margin-top:20px;
+                        padding:20px;
+                        background:#f8fafc;
+                        border-radius:12px;
+                    "
+                >
+
+                    <h3>
+                        👥 Voyageurs
+                    </h3>
+
+                    ${guestsText}
+
+                </div>
+
+
+                <div
+                    style="
+                        margin-top:20px;
+                        padding:20px;
+                        background:#fff7ed;
+                        border-radius:12px;
+                    "
+                >
+
+                    <h3>
+                        🔎 Motif de l'intervention
+                    </h3>
+
+                    <p>
+                        ${escapeHtml(
+                            reason ||
+                            "Aucune offre LiteAPI disponible."
+                        )}
+                    </p>
+
+                </div>
+
+
+                <p
+                    style="
+                        margin-top:25px;
+                        color:#6c7882;
+                    "
+                >
+                    Action requise :
+                    effectuer une recherche manuelle
+                    pour cette demande et contacter le client
+                    si nécessaire.
+                </p>
+
+            </div>
+
+        `
+    };
+
+
+    try {
+
+        if (!resend) {
+
+            console.error(
+                "❌ RESEND NON CONFIGURÉ — NOTIFICATION ADMIN IMPOSSIBLE"
+            );
+
+            return null;
+
+        }
+
+        const result =
+            await resend.emails.send(
+                emailPayload
+            );
+
+        console.log(
+            "📧 ADMIN — RECHERCHE MANUELLE:",
+            JSON.stringify(
+                result,
+                null,
+                2
+            )
+        );
+
+        if (result.error) {
+
+            throw new Error(
+                `Resend admin error: ${
+                    result.error.name
+                } - ${
+                    result.error.message
+                }`
+            );
+
+        }
+
+        return result;
+
+    } catch (error) {
+
+        console.error(
+            "❌ ADMIN MANUAL SEARCH EMAIL ERROR:",
+            error
+        );
+
+        return null;
+
+    }
+
+}
+// ============================================================
 
 async function processHotelAfterPayment(
     data
@@ -2760,86 +3060,74 @@ async function processHotelAfterPayment(
     let prebookResult = null;
 
     // ========================================================
-    // ÉTAPE 1
-    // ESSAYER L'OFFER ID STOCKÉ
-    // ========================================================
+// 🏨 APRÈS PAIEMENT UNIQUEMENT
+// RECHERCHE D'UNE OFFRE LITEAPI
+// ========================================================
 
-    if (data.offerId) {
 
-        try {
+console.log(
+    "🔎 PAIEMENT CONFIRMÉ — RECHERCHE DISPONIBILITÉ LITEAPI..."
+);
 
-            console.log(
-                "🔐 Tentative PREBOOK offre payée:",
-                data.offerId
-            );
+let fresh = null;
 
-            prebookResult =
-                await prebookHotelOffer(
-                    data.offerId
-                );
+try {
 
-            selectedOffer = {
-
-                offerId:
-                    data.offerId,
-
-                hotelId:
-                    data.hotelId,
-
-                hotelName:
-                    data.hotelName,
-
-                roomName:
-                    data.roomName,
-
-                price:
-                    data.providerPrice,
-
-                currency:
-                    data.providerCurrency
-
-            };
-
-        } catch (error) {
-
-            console.warn(
-                "⚠️ OFFER STOCKÉE EXPIRÉE OU INDISPONIBLE"
-            );
-
-            console.warn(
-                error.message
-            );
-
-        }
-
-    }
-
-    // ========================================================
-    // ÉTAPE 2
-    // SI ÉCHEC → NOUVELLE RECHERCHE
-    // ========================================================
-
-    if (
-        !selectedOffer ||
-        !prebookResult
-    ) {
-
-        console.log(
-            "🔄 Recherche d'une nouvelle offre..."
+    fresh =
+        await findPrebookableOffer(
+            data
         );
 
-        const fresh =
-            await findPrebookableOffer(
-                data
-            );
+} catch (error) {
 
-        selectedOffer =
-            fresh.offer;
+    console.error(
+        "❌ LITEAPI — AUCUNE OFFRE RÉSERVABLE:",
+        error
+    );
 
-        prebookResult =
-            fresh.prebook;
+    await sendHotelManualSearchNotification(
+        data,
+        error?.message ||
+            "Aucune offre disponible ou réservable après paiement."
+    );
 
-    }
+    throw error;
+
+}
+
+if (
+    !fresh ||
+    !fresh.offer ||
+    !fresh.prebook
+) {
+
+    console.error(
+        "❌ AUCUNE OFFRE DISPONIBLE APRÈS PAIEMENT"
+    );
+
+    await sendHotelManualSearchNotification(
+        data,
+        "Aucune offre disponible ou réservable après paiement."
+    );
+
+    throw new Error(
+        "Paiement reçu mais aucune chambre disponible ou réservable."
+    );
+
+}
+
+selectedOffer =
+    fresh.offer;
+
+prebookResult =
+    fresh.prebook;
+
+console.log(
+    "✅ OFFRE TROUVÉE APRÈS PAIEMENT:",
+    selectedOffer.offerId
+);
+
+
 
     // ========================================================
     // RÉCUPÉRER LE PREBOOK ID
