@@ -4259,29 +4259,29 @@ function buildHotelPDFHTML(
         data.bookingId ||
         generateHotelReference();
 
-    const hotelName =
-        data.hotelName ||
-        "Hôtel";
+   const hotelName =
+    data.hotelName ||
+    "Établissement";
 
-    const hotelAddress =
-        data.hotelAddress ||
-        "";
+const hotelAddress =
+    data.hotelAddress ||
+    "Adresse non disponible";
 
-    const hotelOwner =
-        data.hotelOwner ||
-        "";
+const hotelOwner =
+    data.hotelOwner ||
+    "";
 
-    const roomName =
-        data.roomName ||
-        "Chambre";
+const roomName =
+    data.roomName ||
+    "Type de chambre non précisé";
 
-    const city =
-        data.city ||
-        "";
+const destination =
+    data.city ||
+    "";
 
-    const country =
-        data.countryCode ||
-        "";
+const country =
+    data.countryCode ||
+    "";
 
     const checkIn =
         formatHotelDate(
@@ -4727,39 +4727,38 @@ body {
         </div>
 
 
-        <div class="hotel-name">
-            ${escapeHtml(hotelName)}
-        </div>
+       <div class="hotel-name">
+    Destination
+</div>
 
+<div class="location">
+    ${escapeHtml(destination)}
+    ${country ? " — " + escapeHtml(country) : ""}
+</div>
 
-        <div class="location">
+<div
+    style="
+        margin-top:12px;
+        font-size:13px;
+        color:#53616c;
+        line-height:1.5;
+    "
+>
+    <strong>Hôtel :</strong>
+    ${escapeHtml(hotelName)}
+</div>
 
-            ${
-                hotelAddress
-                    ? escapeHtml(hotelAddress)
-                    : ""
-            }
-
-            ${
-                hotelAddress && city
-                    ? " — "
-                    : ""
-            }
-
-            ${
-                city
-                    ? escapeHtml(city)
-                    : ""
-            }
-
-            ${
-                country
-                    ? " — " +
-                      escapeHtml(country)
-                    : ""
-            }
-
-        </div>
+<div
+    style="
+        margin-top:6px;
+        font-size:13px;
+        color:#53616c;
+        line-height:1.5;
+    "
+>
+    <strong>Adresse :</strong>
+    ${escapeHtml(hotelAddress)}
+</div>
 
 
         ${
@@ -4846,15 +4845,21 @@ body {
 
             <div class="card">
 
-                <div class="label">
-                    Chambre
-                </div>
+    <div class="label">
+        Adresse de l'établissement
+    </div>
 
-                <div class="value">
-                    ${escapeHtml(roomName)}
-                </div>
+    <div
+        class="value"
+        style="
+            font-size:12px;
+            line-height:1.45;
+        "
+    >
+        ${escapeHtml(hotelAddress)}
+    </div>
 
-            </div>
+</div>
 
         </div>
 
@@ -4869,6 +4874,10 @@ body {
 
                 <div class="row">
 
+
+                <div class="row-label">
+        Type de chambre
+    </div>
                     <div class="row-label">
                         Durée
                     </div>
