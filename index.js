@@ -1032,7 +1032,93 @@ function buildChildrenAges(childrenCount) {
     );
 
 }
+// ============================================================
+// 🏨 RÉCUPÉRER LES DÉTAILS OFFICIELS DE L'HÔTEL VIA LITEAPI
+// ============================================================
 
+async function getLiteApiHotelDetails(hotelId) {
+
+    if (!hotelId) {
+        throw new Error("hotelId LiteAPI manquant");
+    }
+
+    const url =
+        `${LITEAPI_BASE_URL}/data/hotel` +
+        `?hotelId=${encodeURIComponent(hotelId)}` +
+        `&language=fr`;
+
+    const response = await fetch(url, {
+        method: "GET",
+        headers: liteApiHeaders
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+        throw new Error(
+            result.message ||
+            result.error ||
+            "Impossible de récupérer les détails de l'hôtel"
+        );
+    }
+
+    return result.data || result;
+}
+
+
+// ============================================================
+// 📍 CONSTRUIRE L'ADRESSE COMPLÈTE
+// ============================================================
+
+function formatLiteApiHotelAddress(hotel = {}) {
+
+    const toText = value => {
+
+        if (typeof value === "string") {
+            return value.trim();
+        }
+
+        if (value && typeof value === "object") {
+            return (
+                value.formattedAddress ||
+                value.fullAddress ||
+                value.address ||
+                value.label ||
+                ""
+            ).toString().trim();
+        }
+
+        return "";
+    };
+
+    const street =
+        toText(hotel.address) ||
+        toText(hotel.addressLine) ||
+        toText(hotel.address1) ||
+        toText(hotel.street) ||
+        toText(hotel.location?.address);
+
+    // Une ville seule n'est PAS une adresse précise.
+    if (!street) {
+        return "";
+    }
+
+    const parts = [
+        street,
+        toText(hotel.zip || hotel.postalCode),
+        toText(hotel.city || hotel.city_name),
+        toText(hotel.countryName || hotel.country || hotel.country_code)
+    ].filter(Boolean);
+
+    return [
+        ...new Map(
+            parts.map(part => [
+                part.toLowerCase(),
+                part
+            ])
+        ).values()
+    ].join(", ");
+}
 // ============================================================
 // RECHERCHE DES OFFRES LITEAPI
 // ============================================================
@@ -1207,10 +1293,17 @@ console.log(
 
     }
 
-    const offers = [];
+   const offers = [];
 
-    const hotels =
-        result.data || [];
+const hotels =
+    result.data || [];
+
+const hotelMetadataById = new Map(
+    (result.hotels || []).map(hotel => [
+        String(hotel.id || hotel.hotelId),
+        hotel
+    ])
+);
 
     /*
      * IMPORTANT :
@@ -1241,31 +1334,36 @@ console.log(
                 continue;
             }
 
-            const hotelData =
-                hotel.hotelData ||
-                hotel;
+           const hotelId =
+    hotel.hotelId ||
+    hotel.id;
+
+const hotelMetadata =
+    hotelMetadataById.get(String(hotelId)) || {};
+
+const hotelData = {
+    ...hotelMetadata,
+    ...(hotel.hotelData || {})
+};
 
             offers.push({
 
     hotelId:
-        hotelData.hotelId ||
-        hotel.hotelId ||
-        hotel.id,
+    hotelId,
 
-    hotelName:
-        hotelData.name ||
-        hotel.name ||
-        "Hotel",
+hotelName:
+    hotelData.name ||
+    hotel.name ||
+    "",
 
-    // 📍 ADRESSE EXACTE FOURNIE PAR LITEAPI
-    hotelAddress:
-        hotelData.address ||
-        hotelData.addressLine ||
-        hotelData.address1 ||
-        hotelData.street ||
-        hotelData.location?.address ||
-        hotelData.hotelAddress ||
-        "",
+hotelAddress:
+    hotelData.address ||
+    hotelData.addressLine ||
+    hotelData.address1 ||
+    hotelData.street ||
+    hotelData.location?.address ||
+    hotelData.hotelAddress ||
+    "",
 
     // 👤 PROPRIÉTAIRE SI LITEAPI LE FOURNIT
     hotelOwner:
@@ -1522,62 +1620,144 @@ async function prebookHotelOffer(offerId) {
 }
 
 
+// ============================================================
+// 🔎 SÉLECTION D'UNE OFFRE AVEC ADRESSE VÉRIFIÉE
+// ============================================================
+
 async function findPrebookableOffer(data) {
 
-  console.log(
-    "🔎 RECHERCHE D'UNE OFFRE RÉSERVABLE..."
-  );
-
-  const searchResult =
-    await searchHotelOffers(data);
-
-  const offers =
-    searchResult.offers || [];
-
-  if (!offers.length) {
-    throw new Error(
-      "Aucune offre hôtel disponible pour ces dates"
+    console.log(
+        "🔎 RECHERCHE D'UNE OFFRE AVEC ADRESSE PRÉCISE..."
     );
-  }
 
-  for (const offer of offers) {
+    const searchResult =
+        await searchHotelOffers(data);
 
-    try {
+    const offers =
+        searchResult.offers || [];
 
-      console.log(
-        "🧪 TEST OFFER:",
-        offer.offerId
-      );
-
-      const prebook =
-        await prebookHotelOffer(
-          offer.offerId
+    if (!offers.length) {
+        throw new Error(
+            "Aucune offre hôtel disponible pour ces dates"
         );
+    }
 
-      console.log(
-        "✅ OFFER RÉSERVABLE:",
-        offer.offerId
-      );
+    for (const offer of offers) {
 
-      return {
-        offer,
-        prebook
-      };
+        try {
 
-    } catch (error) {
+            console.log(
+                "🏨 VÉRIFICATION HÔTEL:",
+                offer.hotelId
+            );
 
-      console.warn(
-        "⚠️ OFFER NON RÉSERVABLE:",
-        offer.offerId,
-        error.message
-      );
+            // 1. Récupérer les détails officiels
+            let hotelDetails = {};
+
+            try {
+
+                hotelDetails =
+                    await getLiteApiHotelDetails(
+                        offer.hotelId
+                    );
+
+            } catch (error) {
+
+                console.warn(
+                    "⚠️ Détails hôtel indisponibles:",
+                    error.message
+                );
+
+            }
+
+            // 2. Construire l'adresse précise
+            const hotelAddress =
+                formatLiteApiHotelAddress({
+
+                    ...hotelDetails,
+
+                    address:
+                        hotelDetails.address ||
+                        offer.hotelAddress,
+
+                    zip:
+                        hotelDetails.zip ||
+                        hotelDetails.postalCode,
+
+                    city:
+                        hotelDetails.city ||
+                        hotelDetails.city_name ||
+                        data.city,
+
+                    country:
+                        hotelDetails.country ||
+                        hotelDetails.country_code ||
+                        data.countryCode
+
+                });
+
+            // 3. Refuser une offre sans adresse de rue
+            if (!hotelAddress) {
+
+                console.warn(
+                    "⚠️ OFFRE IGNORÉE : ADRESSE PRÉCISE ABSENTE",
+                    offer.hotelId
+                );
+
+                continue;
+
+            }
+
+            // 4. Enrichir l'offre sélectionnée
+            const verifiedOffer = {
+
+                ...offer,
+
+                hotelName:
+                    hotelDetails.name ||
+                    offer.hotelName,
+
+                hotelAddress
+
+            };
+
+            console.log(
+                "📍 ADRESSE HÔTEL VALIDÉE:",
+                hotelAddress
+            );
+
+            // 5. PREBOOK uniquement après vérification
+            const prebook =
+                await prebookHotelOffer(
+                    verifiedOffer.offerId
+                );
+
+            console.log(
+                "✅ OFFRE RÉSERVABLE AVEC ADRESSE:",
+                verifiedOffer.hotelName
+            );
+
+            return {
+                offer: verifiedOffer,
+                prebook
+            };
+
+        } catch (error) {
+
+            console.warn(
+                "⚠️ OFFRE IGNORÉE:",
+                offer.offerId,
+                error.message
+            );
+
+        }
 
     }
-  }
 
-  throw new Error(
-    "Aucune offre hôtel n'a pu être pré-réservée"
-  );
+    throw new Error(
+        "Aucune offre réservable avec une adresse précise disponible."
+    );
+
 }
 
 
@@ -4874,10 +5054,6 @@ body {
 
                 <div class="row">
 
-
-                <div class="row-label">
-        Type de chambre
-    </div>
                     <div class="row-label">
                         Durée
                     </div>
