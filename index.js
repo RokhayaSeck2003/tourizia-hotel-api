@@ -1247,43 +1247,76 @@ console.log(
 
             offers.push({
 
-                hotelId:
-                    hotelData.hotelId ||
-                    hotel.hotelId ||
-                    hotel.id,
+    hotelId:
+        hotelData.hotelId ||
+        hotel.hotelId ||
+        hotel.id,
 
-                hotelName:
-                    hotelData.name ||
-                    hotel.name ||
-                    "Hotel",
+    hotelName:
+        hotelData.name ||
+        hotel.name ||
+        "Hotel",
 
-                offerId:
-                    room.offerId,
+    // 📍 ADRESSE EXACTE FOURNIE PAR LITEAPI
+    hotelAddress:
+        hotelData.address ||
+        hotelData.addressLine ||
+        hotelData.address1 ||
+        hotelData.street ||
+        hotelData.location?.address ||
+        hotelData.hotelAddress ||
+        "",
 
-                roomName:
-                    room.name ||
-                    room.roomName ||
-                    "Chambre",
+    // 👤 PROPRIÉTAIRE SI LITEAPI LE FOURNIT
+    hotelOwner:
+        typeof (
+            hotelData.owner ||
+            hotelData.propertyOwner ||
+            hotelData.ownerName ||
+            hotelData.proprietor ||
+            ""
+        ) === "object"
+            ? (
+                hotelData.owner?.name ||
+                hotelData.owner?.fullName ||
+                hotelData.owner?.companyName ||
+                ""
+            )
+            : (
+                hotelData.owner ||
+                hotelData.propertyOwner ||
+                hotelData.ownerName ||
+                hotelData.proprietor ||
+                ""
+            ),
 
-                price:
-                    room.retailRate?.total ||
-                    room.price ||
-                    room.rate?.total ||
-                    null,
+    offerId:
+        room.offerId,
 
-                currency:
-                    room.retailRate?.currency ||
-                    "EUR",
+    roomName:
+        room.name ||
+        room.roomName ||
+        "Chambre",
 
-                refundable:
-                    room.refundableTag ||
-                    room.rateTags ||
-                    null,
+    price:
+        room.retailRate?.total ||
+        room.price ||
+        room.rate?.total ||
+        null,
 
-                raw:
-                    room
+    currency:
+        room.retailRate?.currency ||
+        "EUR",
 
-            });
+    refundable:
+        room.refundableTag ||
+        room.rateTags ||
+        null,
+
+    raw:
+        room
+
+});
 
         }
 
@@ -3872,6 +3905,15 @@ await updateHotelTransactionStatus(
         hotelName:
             selectedOffer.hotelName ||
             data.hotelName,
+            hotelAddress:
+    selectedOffer.hotelAddress ||
+    data.hotelAddress ||
+    "",
+
+hotelOwner:
+    selectedOffer.hotelOwner ||
+    data.hotelOwner ||
+    "",
 
         roomName:
             selectedOffer.roomName ||
@@ -4221,6 +4263,14 @@ function buildHotelPDFHTML(
         data.hotelName ||
         "Hôtel";
 
+    const hotelAddress =
+        data.hotelAddress ||
+        "";
+
+    const hotelOwner =
+        data.hotelOwner ||
+        "";
+
     const roomName =
         data.roomName ||
         "Chambre";
@@ -4242,47 +4292,45 @@ function buildHotelPDFHTML(
         formatHotelDate(
             data.checkOut
         );
-        const durationNights =
-    Math.max(
-        0,
-        Math.round(
-            (
-                new Date(data.checkOut) -
-                new Date(data.checkIn)
-            ) /
-            (1000 * 60 * 60 * 24)
-        )
-    );
+
+    const durationNights =
+        Math.max(
+            0,
+            Math.round(
+                (
+                    new Date(data.checkOut) -
+                    new Date(data.checkIn)
+                ) /
+                (1000 * 60 * 60 * 24)
+            )
+        );
 
     const adults =
-        Number(
-            data.adults || 0
-        );
+        Number(data.adults || 0);
 
     const children =
-        Number(
-            data.children || 0
-        );
+        Number(data.children || 0);
 
     const rooms =
-        Number(
-            data.rooms || 1
-        );
-        const refundable =
-    data.refundable || null;
+        Number(data.rooms || 1);
+
+    const refundable =
+        data.refundable || null;
 
     const customer =
-    data.guestName ||
-    data.fullName ||
-    "Client Tourizia";
+        data.guestName ||
+        data.fullName ||
+        "Client Tourizia";
+
     const guestType =
-    data.guestType || "adult";
+        data.guestType ||
+        "adult";
 
-const guestNumber =
-    Number(data.guestNumber || 1);
+    const guestNumber =
+        Number(data.guestNumber || 1);
 
-const totalGuests =
-    Number(data.totalGuests || 1);
+    const totalGuests =
+        Number(data.totalGuests || 1);
 
     return `
 
@@ -4304,18 +4352,27 @@ Confirmation réservation hôtel ${escapeHtml(reference)}
     box-sizing: border-box;
 }
 
+@page {
+    size: A4;
+    margin: 0;
+}
+
+html,
+body {
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+    padding: 0;
+}
+
 body {
 
-    margin: 0;
-
-    padding: 40px;
+    background: #ffffff;
 
     font-family:
         Arial,
         Helvetica,
         sans-serif;
-
-    background: #f5f7f9;
 
     color: #17212b;
 
@@ -4323,25 +4380,23 @@ body {
 
 .page {
 
-    max-width: 820px;
+    width: 210mm;
 
-    margin: 0 auto;
+    height: 297mm;
 
-    background: #ffffff;
+    margin: 0;
 
-    border-radius: 18px;
+    padding: 0;
 
     overflow: hidden;
 
-    box-shadow:
-        0 10px 35px
-        rgba(0,0,0,0.08);
+    background: #ffffff;
 
 }
 
 .header {
 
-    padding: 28px 35px;
+    padding: 18px 30px;
 
     background:
         linear-gradient(
@@ -4356,29 +4411,25 @@ body {
 
 .logo {
 
-    font-size: 28px;
+    font-size: 27px;
 
     font-weight: 800;
-
-    letter-spacing: 0.5px;
 
 }
 
 .header-subtitle {
 
-    margin-top: 7px;
+    margin-top: 5px;
 
-    font-size: 14px;
-
-    opacity: 0.95;
+    font-size: 13px;
 
 }
 
 .reference {
 
-    margin-top: 20px;
+    margin-top: 11px;
 
-    padding-top: 18px;
+    padding-top: 11px;
 
     border-top:
         1px solid
@@ -4389,25 +4440,24 @@ body {
     justify-content:
         space-between;
 
-    gap: 20px;
-
 }
 
 .reference-label {
 
-    font-size: 11px;
+    font-size: 10px;
 
-    text-transform: uppercase;
+    text-transform:
+        uppercase;
 
-    opacity: 0.80;
+    opacity: .8;
 
 }
 
 .reference-value {
 
-    margin-top: 5px;
+    margin-top: 3px;
 
-    font-size: 18px;
+    font-size: 17px;
 
     font-weight: 700;
 
@@ -4415,7 +4465,7 @@ body {
 
 .content {
 
-    padding: 35px;
+    padding: 20px 30px;
 
 }
 
@@ -4423,7 +4473,7 @@ body {
 
     display: inline-block;
 
-    padding: 8px 15px;
+    padding: 5px 12px;
 
     border-radius: 30px;
 
@@ -4433,19 +4483,19 @@ body {
 
     font-weight: 700;
 
-    font-size: 13px;
+    font-size: 11px;
 
-    margin-bottom: 25px;
+    margin-bottom: 14px;
 
 }
 
 .hotel-name {
 
-    font-size: 25px;
+    font-size: 22px;
 
     font-weight: 800;
 
-    margin-bottom: 7px;
+    margin-bottom: 4px;
 
 }
 
@@ -4453,9 +4503,27 @@ body {
 
     color: #687580;
 
-    font-size: 14px;
+    font-size: 12px;
 
-    margin-bottom: 30px;
+    line-height: 1.5;
+
+    margin-bottom: 6px;
+
+}
+
+.hotel-owner {
+
+    font-size: 11px;
+
+    color: #7a858e;
+
+    margin-bottom: 15px;
+
+}
+
+.hotel-owner strong {
+
+    color: #17212b;
 
 }
 
@@ -4466,7 +4534,7 @@ body {
     grid-template-columns:
         1fr 1fr;
 
-    gap: 14px;
+    gap: 8px;
 
 }
 
@@ -4477,25 +4545,26 @@ body {
 
     border-radius: 12px;
 
-    padding: 18px;
+    padding: 11px 13px;
 
 }
 
 .label {
 
-    font-size: 11px;
+    font-size: 10px;
 
-    text-transform: uppercase;
+    text-transform:
+        uppercase;
 
     color: #7a858e;
 
-    margin-bottom: 7px;
+    margin-bottom: 4px;
 
 }
 
 .value {
 
-    font-size: 15px;
+    font-size: 14px;
 
     font-weight: 700;
 
@@ -4503,17 +4572,17 @@ body {
 
 .section {
 
-    margin-top: 28px;
+    margin-top: 14px;
 
 }
 
 .section-title {
 
-    font-size: 16px;
+    font-size: 15px;
 
     font-weight: 800;
 
-    margin-bottom: 12px;
+    margin-bottom: 7px;
 
 }
 
@@ -4535,12 +4604,12 @@ body {
     justify-content:
         space-between;
 
-    padding: 13px 16px;
+    padding: 7px 13px;
 
     border-bottom:
         1px solid #edf0f2;
 
-    font-size: 14px;
+    font-size: 12px;
 
 }
 
@@ -4566,9 +4635,9 @@ body {
 
 .notice {
 
-    margin-top: 28px;
+    margin-top: 13px;
 
-    padding: 18px;
+    padding: 10px 13px;
 
     background: #f3f8fa;
 
@@ -4576,23 +4645,23 @@ body {
 
     color: #53616c;
 
-    font-size: 12px;
+    font-size: 10px;
 
-    line-height: 1.6;
+    line-height: 1.35;
 
 }
 
 .footer {
 
-    padding: 22px 35px;
+    padding: 11px 30px;
 
     background: #f7f9fa;
 
     color: #7b858d;
 
-    font-size: 11px;
+    font-size: 9px;
 
-    line-height: 1.6;
+    line-height: 1.3;
 
 }
 
@@ -4601,151 +4670,7 @@ body {
     color: #17212b;
 
 }
-/* ============================================================
-   TOURIZIA — PDF A4 — UNE SEULE PAGE
-   ============================================================ */
 
-@page {
-    size: A4;
-    margin: 0;
-}
-
-html,
-body {
-    width: 210mm;
-    height: 297mm;
-    margin: 0;
-    padding: 0;
-}
-
-body {
-    background: #ffffff;
-    font-family: Arial, Helvetica, sans-serif;
-}
-
-/* PAGE A4 FIXE */
-.page {
-    width: 210mm;
-    height: 297mm;
-    max-width: none;
-    min-height: 0;
-    margin: 0;
-    padding: 0;
-    border-radius: 0;
-    box-shadow: none;
-    overflow: hidden;
-}
-
-/* HEADER */
-.header {
-    padding: 18px 30px;
-}
-
-.logo {
-    font-size: 27px;
-}
-
-.header-subtitle {
-    margin-top: 5px;
-    font-size: 13px;
-}
-
-.reference {
-    margin-top: 11px;
-    padding-top: 11px;
-}
-
-.reference-label {
-    font-size: 10px;
-}
-
-.reference-value {
-    margin-top: 3px;
-    font-size: 17px;
-}
-
-/* CONTENU */
-.content {
-    padding: 20px 30px;
-}
-
-.status {
-    padding: 5px 12px;
-    font-size: 11px;
-    margin-bottom: 14px;
-}
-
-.hotel-name {
-    font-size: 22px;
-    margin-bottom: 3px;
-}
-
-.location {
-    font-size: 12px;
-    margin-bottom: 15px;
-}
-
-/* CARTES */
-.grid {
-    gap: 8px;
-}
-
-.card {
-    padding: 11px 13px;
-}
-
-.label {
-    font-size: 10px;
-    margin-bottom: 4px;
-}
-
-.value {
-    font-size: 14px;
-}
-
-/* SECTION */
-.section {
-    margin-top: 14px;
-}
-
-.section-title {
-    font-size: 15px;
-    margin-bottom: 7px;
-}
-
-/* DETAILS */
-.row {
-    padding: 7px 13px;
-    font-size: 12px;
-}
-
-/* NOTICE */
-.notice {
-    margin-top: 13px;
-    padding: 10px 13px;
-    font-size: 10px;
-    line-height: 1.35;
-}
-
-/* FOOTER */
-.footer {
-    padding: 11px 30px;
-    font-size: 9px;
-    line-height: 1.3;
-}
-
-/* Évite les coupures */
-.header,
-.content,
-.grid,
-.card,
-.section,
-.details,
-.notice,
-.footer {
-    break-inside: avoid;
-    page-break-inside: avoid;
-}
 </style>
 
 </head>
@@ -4806,12 +4731,49 @@ body {
             ${escapeHtml(hotelName)}
         </div>
 
+
         <div class="location">
-            ${escapeHtml(city)}
-            ${country
-                ? " — " + escapeHtml(country)
-                : ""}
+
+            ${
+                hotelAddress
+                    ? escapeHtml(hotelAddress)
+                    : ""
+            }
+
+            ${
+                hotelAddress && city
+                    ? " — "
+                    : ""
+            }
+
+            ${
+                city
+                    ? escapeHtml(city)
+                    : ""
+            }
+
+            ${
+                country
+                    ? " — " +
+                      escapeHtml(country)
+                    : ""
+            }
+
         </div>
+
+
+        ${
+            hotelOwner
+                ? `
+                    <div class="hotel-owner">
+                        Propriétaire :
+                        <strong>
+                            ${escapeHtml(hotelOwner)}
+                        </strong>
+                    </div>
+                  `
+                : ""
+        }
 
 
         <div class="grid">
@@ -4845,35 +4807,40 @@ body {
             <div class="card">
 
                 <div class="label">
-    Voyageur
-</div>
+                    Voyageur
+                </div>
 
-<div class="value">
-    ${escapeHtml(customer)}
-</div> 
-<div
-    style="
-        margin-top:6px;
-        font-size:12px;
-        color:#6c7882;
-    "
->
-    Personne ${guestNumber} sur ${totalGuests}
-</div>
+                <div class="value">
+                    ${escapeHtml(customer)}
+                </div>
 
-<div
-    style="
-        margin-top:4px;
-        font-size:12px;
-        color:#6c7882;
-    "
->
-    ${
-        guestType === "child"
-            ? "Enfant"
-            : "Adulte"
-    }
-</div>
+                <div
+                    style="
+                        margin-top:6px;
+                        font-size:11px;
+                        color:#6c7882;
+                    "
+                >
+                    Personne
+                    ${guestNumber}
+                    sur
+                    ${totalGuests}
+                </div>
+
+                <div
+                    style="
+                        margin-top:3px;
+                        font-size:11px;
+                        color:#6c7882;
+                    "
+                >
+                    ${
+                        guestType === "child"
+                            ? "Enfant"
+                            : "Adulte"
+                    }
+                </div>
+
             </div>
 
 
@@ -4898,19 +4865,28 @@ body {
                 Détails du séjour
             </div>
 
-            <div class="row">
-
-    <div class="row-label">
-        Durée
-    </div>
-
-    <div class="row-value">
-        ${durationNights}
-        nuit${durationNights > 1 ? "s" : ""}
-    </div>
-
-</div>
             <div class="details">
+
+                <div class="row">
+
+                    <div class="row-label">
+                        Durée
+                    </div>
+
+                    <div class="row-value">
+
+                        ${durationNights}
+
+                        nuit${
+                            durationNights > 1
+                                ? "s"
+                                : ""
+                        }
+
+                    </div>
+
+                </div>
+
 
                 <div class="row">
 
@@ -4927,15 +4903,17 @@ body {
 
                 <div class="row">
 
-    <div class="row-label">
-        Voyageurs
-    </div>
+                    <div class="row-label">
+                        Voyageurs
+                    </div>
 
-    <div class="row-value">
-        ${adults + children}
-    </div>
+                    <div class="row-value">
+                        ${adults + children}
+                    </div>
 
-</div> 
+                </div>
+
+
                 <div class="row">
 
                     <div class="row-label">
@@ -4983,7 +4961,8 @@ body {
 
                     <div class="row-value">
                         ${escapeHtml(
-                            data.bookingId || reference
+                            data.bookingId ||
+                            reference
                         )}
                     </div>
 
@@ -4992,45 +4971,56 @@ body {
             </div>
 
         </div>
-${
-    refundable
-        ? `
-            <div class="section">
 
-                <div class="section-title">
-                    Conditions tarifaires
-                </div>
 
-                <div class="notice">
-                    ${escapeHtml(
-                        typeof refundable === "string"
-                            ? refundable
-                            : JSON.stringify(refundable)
-                    )}
-                </div>
+        ${
+            refundable
+                ? `
+                    <div class="section">
 
-            </div>
-        `
-        : ""
-}
+                        <div class="section-title">
+                            Conditions tarifaires
+                        </div>
+
+                        <div class="notice">
+
+                            ${escapeHtml(
+                                typeof refundable === "string"
+                                    ? refundable
+                                    : JSON.stringify(
+                                        refundable
+                                    )
+                            )}
+
+                        </div>
+
+                    </div>
+                  `
+                : ""
+        }
+
 
         <div class="notice">
 
-            <div class="notice">
-    <strong>Important</strong>
+            <strong>
+                Important
+            </strong>
 
-    <div style="margin-top:6px;">
-        Ce document confirme la réservation
-        traitée par Tourizia auprès de son
-        fournisseur hôtelier.
-    </div>
+            <div style="margin-top:5px;">
 
-    <div style="margin-top:5px;">
-        Veuillez conserver ce document et
-        présenter votre référence de réservation
-        lors de votre séjour.
-    </div>
-</div>
+                Ce document confirme la réservation
+                traitée par Tourizia auprès de son
+                fournisseur hôtelier.
+
+            </div>
+
+            <div style="margin-top:4px;">
+
+                Veuillez conserver ce document et
+                présenter votre référence de réservation
+                lors de votre séjour.
+
+            </div>
 
         </div>
 
