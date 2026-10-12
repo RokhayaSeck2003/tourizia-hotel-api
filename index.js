@@ -166,7 +166,10 @@ function generateHotelTransactionId() {
 // 🧾 CRÉER TRANSACTION
 // ============================================================
 
-async function createHotelTransaction(data) {
+async function createHotelTransaction(
+    data,
+    transactionId = generateHotelTransactionId()
+) {
 
     if (!hotelTransactions) {
 
@@ -177,8 +180,6 @@ async function createHotelTransaction(data) {
         return null;
     }
 
-    const transactionId =
-        generateHotelTransactionId();
 
     const now =
         new Date();
@@ -2159,235 +2160,278 @@ console.log(
 // STRIPE — CRÉATION DU CHECKOUT
 // ============================================================
 
+// ============================================================
+// STRIPE — CRÉATION DU CHECKOUT HÔTEL
+// ============================================================
+
 app.post(
   "/create-hotel-payment",
   express.json(),
   async (req, res) => {
-      try {
-    if (!stripe) {
-      return res.status(500).json({
-        error: "Stripe n'est pas configuré."
-      });
-    }
 
-    const validation = validateHotelRequest(req.body);
+    let transactionPromise = null;
 
-if (validation) {
+    try {
 
-    return res.status(400).json({
-        success: false,
-        error: validation
-    });
+      // --------------------------------------------------------
+      // STRIPE
+      // --------------------------------------------------------
 
-}
+      if (!stripe) {
+        return res.status(500).json({
+          error: "Stripe n'est pas configuré."
+        });
+      }
 
-const data = req.body;
+      // --------------------------------------------------------
+      // VALIDATION DE LA DEMANDE
+      // --------------------------------------------------------
 
-const transactionId =
-    await createHotelTransaction({
+      const validation =
+        validateHotelRequest(req.body);
 
-        ...data,
-
-        paymentMethod:
-            "stripe"
-
-    });
-
-
-// ========================================================
-// 👥 NOMBRE TOTAL DE VOYAGEURS
-// ========================================================
-
-const adults =
-    Number(data.adults || 0);
-
-const children =
-    Number(data.children || 0);
-
-const totalPersons =
-    adults + children;
-
-
-// ========================================================
-// 🛡️ SÉCURITÉ
-// ========================================================
-
-if (totalPersons < 1) {
-
-    return res.status(400).json({
-
-        success: false,
-
-        error:
-            "Nombre de voyageurs invalide."
-
-    });
-
-}
-
-
-// ========================================================
-// 🛡️ VÉRIFIER LES NOMS DES VOYAGEURS
-// ========================================================
-
-if (
-    !Array.isArray(data.guests) ||
-    data.guests.length !== totalPersons
-) {
-
-    return res.status(400).json({
-
-        success: false,
-
-        error:
-            `Les informations des ${totalPersons} voyageurs sont requises.`
-
-    });
-
-}
-
-
-for (
-    const guest of data.guests
-) {
-
-    if (
-        !guest.firstName ||
-        !guest.lastName
-    ) {
-
+      if (validation) {
         return res.status(400).json({
+          success: false,
+          error: validation
+        });
+      }
 
+      const data = req.body;
+
+      // --------------------------------------------------------
+      // 👥 NOMBRE TOTAL DE VOYAGEURS
+      // --------------------------------------------------------
+
+      const adults =
+        Number(data.adults || 0);
+
+      const children =
+        Number(data.children || 0);
+
+      const totalPersons =
+        adults + children;
+
+      if (totalPersons < 1) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Nombre de voyageurs invalide."
+        });
+      }
+
+      // --------------------------------------------------------
+      // 🛡️ VÉRIFIER LES VOYAGEURS
+      // --------------------------------------------------------
+
+      if (
+        !Array.isArray(data.guests) ||
+        data.guests.length !== totalPersons
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            `Les informations des ${totalPersons} voyageurs sont requises.`
+        });
+      }
+
+      for (const guest of data.guests) {
+
+        if (
+          !guest.firstName ||
+          !guest.lastName
+        ) {
+          return res.status(400).json({
             success: false,
-
             error:
-                "Le prénom et le nom de chaque voyageur sont obligatoires."
+              "Le prénom et le nom de chaque voyageur sont obligatoires."
+          });
+        }
 
+      }
+
+      // --------------------------------------------------------
+      // 🔑 ID TRANSACTION GÉNÉRÉ IMMÉDIATEMENT
+      // --------------------------------------------------------
+
+      const transactionId =
+        generateHotelTransactionId();
+
+      // --------------------------------------------------------
+      // 🔐 PAIEMENT D'ABORD
+      // --------------------------------------------------------
+      // Aucune recherche LiteAPI ici.
+      // LiteAPI sera appelée uniquement après paiement confirmé.
+      // --------------------------------------------------------
+
+      const offerToken =
+        "HOTEL-" +
+        Date.now() +
+        "-" +
+        Math.random()
+          .toString(36)
+          .slice(2, 10);
+
+      pendingHotelPayments.set(
+        offerToken,
+        {
+          data
+        }
+      );
+
+      console.log(
+        "🔐 DONNÉES HÔTEL STOCKÉES AVANT PAIEMENT:",
+        offerToken
+      );
+
+      console.log(
+        "🔐 OFFER TOKEN STRIPE:",
+        offerToken
+      );
+
+      // --------------------------------------------------------
+      // 🧾 MONGODB EN PARALLÈLE AVEC STRIPE
+      // --------------------------------------------------------
+
+      transactionPromise =
+        createHotelTransaction(
+          {
+            ...data,
+            paymentMethod: "stripe"
+          },
+          transactionId
+        );
+
+      // --------------------------------------------------------
+      // 💳 CRÉATION CHECKOUT STRIPE
+      // --------------------------------------------------------
+
+      const session =
+        await stripe.checkout.sessions.create({
+
+          mode: "payment",
+
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+
+                product_data: {
+                  name:
+                    "Réservation hôtel — Tourizia",
+
+                  description:
+                    `${data.city} | ${data.checkIn} → ${data.checkOut}`
+                },
+
+                unit_amount:
+                  HOTEL_STRIPE_PRICE
+              },
+
+              quantity:
+                totalPersons
+            }
+          ],
+
+          customer_email:
+            data.email,
+
+          success_url:
+            "https://tourizia.com/?hotel_payment=success",
+
+          cancel_url:
+            "https://tourizia.com/?hotel_payment=cancel",
+
+          metadata: {
+
+            type:
+              "hotel",
+
+            paymentMethod:
+              "stripe",
+
+            transactionId:
+              transactionId || "",
+
+            fullName:
+              data.fullName || "",
+
+            email:
+              data.email || "",
+
+            city:
+              data.city,
+
+            countryCode:
+              data.countryCode,
+
+            checkIn:
+              data.checkIn,
+
+            checkOut:
+              data.checkOut,
+
+            adults:
+              String(data.adults),
+
+            children:
+              String(data.children),
+
+            rooms:
+              String(data.rooms),
+
+            guestNationality:
+              data.guestNationality || "SN",
+
+            offerToken:
+              offerToken
+          }
         });
 
+      console.log(
+        "💳 Stripe Checkout créé :",
+        session.id
+      );
+
+      // --------------------------------------------------------
+      // 🧾 S'ASSURER QUE LA TRANSACTION EST BIEN ENREGISTRÉE
+      // AVANT DE DONNER L'URL AU CLIENT
+      // --------------------------------------------------------
+
+      await transactionPromise;
+
+      // --------------------------------------------------------
+      // 🚀 RETOUR RAPIDE AU FRONTEND
+      // --------------------------------------------------------
+
+      return res.json({
+        success: true,
+        url: session.url
+      });
+
+    } catch (error) {
+
+      // Évite une promesse MongoDB non gérée
+      if (transactionPromise) {
+        await transactionPromise.catch(() => {});
+      }
+
+      console.error(
+        "❌ Erreur création Stripe hôtel :",
+        error.response?.data ||
+        error.message ||
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "Impossible de créer le paiement hôtel."
+      });
+
     }
 
-}
-
-    console.log("🏨 Création paiement Stripe hôtel...");
-    console.log(data);
-
-    // --------------------------------------------------------
-    // IMPORTANT :
-    // On ne fait PAS confiance à offerId venant du frontend.
-    // Le backend recherche lui-même une offre valide.
-    // --------------------------------------------------------
-
-  // --------------------------------------------------------
-// 🔐 PAIEMENT D'ABORD
-// --------------------------------------------------------
-// AUCUNE recherche LiteAPI ici.
-// La disponibilité sera vérifiée uniquement
-// après confirmation du paiement.
-// --------------------------------------------------------
-
-const offerToken =
-  "HOTEL-" +
-  Date.now() +
-  "-" +
-  Math.random().toString(36).slice(2, 10);
-
-pendingHotelPayments.set(
-  offerToken,
-  {
-    data
   }
-);
-
-console.log(
-  "🔐 DONNÉES HÔTEL STOCKÉES AVANT PAIEMENT:",
-  offerToken
-);
-
-console.log(
-  "🔐 OFFER TOKEN STRIPE:",
-  offerToken
-);
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-
-            product_data: {
-              name: "Réservation hôtel — Tourizia",
-              description:
-                `${data.city} | ${data.checkIn} → ${data.checkOut}`
-            },
-
-            unit_amount: HOTEL_STRIPE_PRICE
-          },
-
-          quantity: totalPersons
-        }
-      ],
-
-      customer_email: data.email,
-
-      success_url:
-        "https://tourizia.com/?hotel_payment=success",
-
-      cancel_url:
-        "https://tourizia.com/?hotel_payment=cancel",
-
-      metadata: {
-        type: "hotel",
-
-        paymentMethod: "stripe",
-
-        transactionId:
-    transactionId || "",
-
-        fullName: data.fullName || "",
-        email: data.email || "",
-
-        city: data.city,
-        countryCode: data.countryCode,
-
-        checkIn: data.checkIn,
-        checkOut: data.checkOut,
-
-        adults: String(data.adults),
-        children: String(data.children),
-        rooms: String(data.rooms),
-
-        guestNationality:
-          data.guestNationality || "SN",
-
-        // Offre sélectionnée côté serveur
-       // 🔐 Token permettant de retrouver
-// les données après paiement
-offerToken: offerToken
-      }
-    });
-
-    console.log("💳 Stripe Checkout créé :", session.id);
-
-    return res.json({
-      success: true,
-      url: session.url
-    });
-
-  } catch (error) {
-
-    console.error(
-      "❌ Erreur création Stripe hôtel :",
-      error.response?.data || error.message || error
-    );
-
-    return res.status(500).json({
-      error: "Impossible de créer le paiement hôtel."
-    });
-  }
-}
 );
 
 
@@ -2418,15 +2462,12 @@ if (validation) {
 }
 
 const data = req.body;
+
 const transactionId =
-    await createHotelTransaction({
+    generateHotelTransactionId();
 
-        ...data,
+let transactionPromise = null;
 
-        paymentMethod:
-            targetPayment
-
-    });
 // ========================================================
 // 👥 TOTAL VOYAGEURS
 // ========================================================
@@ -2514,6 +2555,14 @@ totalPersons:
         data.guestNationality || "SN",
 
     };
+    transactionPromise =
+    createHotelTransaction(
+        {
+            ...data,
+            paymentMethod: targetPayment
+        },
+        transactionId
+    );
 
 
     // --------------------------------------------------------
@@ -2612,6 +2661,13 @@ totalPersons:
 
 
     // --------------------------------------------------------
+// 🧾 S'ASSURER QUE LA TRANSACTION EST ENREGISTRÉE
+// AVANT DE DONNER L'URL AU CLIENT
+// --------------------------------------------------------
+
+await transactionPromise;
+
+    // --------------------------------------------------------
     // Retour frontend
     // --------------------------------------------------------
 
@@ -2633,6 +2689,10 @@ totalPersons:
 
 
   } catch (error) {
+
+    if (transactionPromise) {
+        await transactionPromise.catch(() => {});
+    }
 
     console.error(
       `❌ Erreur PayTech ${targetPayment} :`,
