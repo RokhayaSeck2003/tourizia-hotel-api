@@ -1057,19 +1057,35 @@ async function searchHotelOffers(data) {
     const children =
         Number(data.children || 0);
 
-    const occupancies =
-        Array.from(
-            {
-                length: rooms
-            },
-            () => ({
-                adults,
-                children:
-                    buildChildrenAges(
-                        children
-                    )
-            })
-        );
+    const occupancies = [];
+
+let remainingAdults = adults;
+let remainingChildren = children;
+
+for (let i = 0; i < rooms; i++) {
+
+    const roomsLeft = rooms - i;
+
+    // Répartition équilibrée des adultes
+    const roomAdults = Math.ceil(
+        remainingAdults / roomsLeft
+    );
+
+    // Répartition équilibrée des enfants
+    const roomChildren = Math.ceil(
+        remainingChildren / roomsLeft
+    );
+
+    occupancies.push({
+        adults: roomAdults,
+        children: buildChildrenAges(
+            roomChildren
+        )
+    });
+
+    remainingAdults -= roomAdults;
+    remainingChildren -= roomChildren;
+}
 
     const requestBody = {
 
