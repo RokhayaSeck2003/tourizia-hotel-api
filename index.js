@@ -1161,21 +1161,27 @@ if (data.hotelId) {
     );
 
     const response =
-        await fetch(
-            `${LITEAPI_BASE_URL}/hotels/rates`,
-            {
-                method: "POST",
-                headers:
-                    liteApiHeaders,
-                body:
-                    JSON.stringify(
-                        requestBody
-                    )
-            }
-        );
+    await fetch(
+        `${LITEAPI_BASE_URL}/hotels/rates`,
+        {
+            method: "POST",
+            headers: liteApiHeaders,
+            body: JSON.stringify(requestBody)
+        }
+    );
 
-    const result =
-        await response.json();
+const result =
+    await response.json();
+
+console.log(
+    "🔎 LITEAPI RAW RESPONSE:",
+    JSON.stringify(result, null, 2)
+);
+
+console.log(
+    "🏨 LITEAPI RATES STATUS:",
+    response.status
+);
 
     console.log(
         "🏨 LITEAPI RATES STATUS:",
