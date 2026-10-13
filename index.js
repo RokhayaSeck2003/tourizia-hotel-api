@@ -262,41 +262,34 @@ async function createHotelTransaction(
 
         },
 
-        provider: {
+       provider: {
 
-            name:
-                "LiteAPI",
+    name: "LiteAPI",
 
-            hotelId:
-                null,
+    hotelId: null,
+    hotelName: null,
+    roomName: null,
+    offerId: null,
+    prebookId: null,
+    bookingId: null,
+    confirmationNumber: null,
+    price: null,
+    currency: null
 
-            hotelName:
-                null,
+},
 
-            roomName:
-                null,
+cancellation: {
 
-            offerId:
-                null,
+    allowed: true,
+    deadline: null,
+    policy: null,
+    status: "ACTIVE",
+    cancelledAt: null,
+    providerCancellationId: null
 
-            prebookId:
-                null,
+},
 
-            bookingId:
-                null,
-
-            confirmationNumber:
-                null,
-
-            price:
-                null,
-
-            currency:
-                null
-
-        },
-
-        error: null,
+error: null,
 
         history: [
 
@@ -1408,12 +1401,18 @@ hotelAddress:
         "EUR",
 
     refundable:
-        room.refundableTag ||
-        room.rateTags ||
-        null,
+    room.cancellationPolicies?.refundableTag ||
+    room.refundableTag ||
+    room.rateTags ||
+    null,
 
-    raw:
-        room
+cancellationPolicies:
+    room.cancellationPolicies ||
+    room.rates?.[0]?.cancellationPolicies ||
+    null,
+
+raw:
+    room
 
 });
 
@@ -1710,17 +1709,40 @@ async function findPrebookableOffer(data) {
             }
 
             // 4. Enrichir l'offre sélectionnée
-            const verifiedOffer = {
+           const verifiedOffer = {
 
-                ...offer,
+    ...offer,
 
-                hotelName:
-                    hotelDetails.name ||
-                    offer.hotelName,
+    hotelName:
+        hotelDetails.name ||
+        offer.hotelName,
 
-                hotelAddress
+    hotelAddress,
 
-            };
+    hotelPhone:
+        hotelDetails.phone ||
+        hotelDetails.phoneNumber ||
+        hotelDetails.telephone ||
+        "",
+
+    hotelEmail:
+        hotelDetails.email ||
+        hotelDetails.contactEmail ||
+        "",
+
+    hotelWebsite:
+        hotelDetails.website ||
+        hotelDetails.webSite ||
+        hotelDetails.url ||
+        "",
+
+    hotelOwner:
+        hotelDetails.owner ||
+        hotelDetails.ownerName ||
+        "",
+
+    hotelDetails
+};
 
             console.log(
                 "📍 ADRESSE HÔTEL VALIDÉE:",
@@ -4114,6 +4136,64 @@ await updateHotelTransactionStatus(
     }
 );
 
+// ========================================================
+// 📅 POLITIQUE D'ANNULATION LITEAPI
+// ========================================================
+
+const bookingData =
+    bookingResult.data ||
+    bookingResult.booking ||
+    bookingResult;
+
+const cancellationPolicies =
+    bookingData.cancellationPolicies ||
+    selectedOffer.cancellationPolicies ||
+    {};
+
+const refundableTag =
+    bookingData.tag ||
+    bookingData.refundableTag ||
+    cancellationPolicies.refundableTag ||
+    null;
+
+const cancelPolicyInfos =
+    cancellationPolicies.cancelPolicyInfos ||
+    [];
+
+const cancellationDeadline =
+    bookingData.lastFreeCancellationDate ||
+    bookingData.last_free_cancellation_date ||
+    cancelPolicyInfos[0]?.cancelTime ||
+    null;
+
+await updateHotelTransaction(
+    data.transactionId,
+    {
+        "cancellation.allowed":
+            Boolean(cancellationPolicies),
+
+        "cancellation.deadline":
+            cancellationDeadline,
+
+        "cancellation.policy": {
+            refundableTag,
+            cancelPolicyInfos,
+            hotelRemarks:
+                cancellationPolicies.hotelRemarks || []
+        },
+
+        "cancellation.status":
+            "ACTIVE"
+    }
+);
+
+console.log(
+    "📅 POLITIQUE D'ANNULATION ENREGISTRÉE:",
+    {
+        refundableTag,
+        cancellationDeadline
+    }
+);
     // ========================================================
     // RÉSULTAT FINAL
     // ========================================================
@@ -4153,6 +4233,17 @@ await updateHotelTransactionStatus(
 hotelOwner:
     selectedOffer.hotelOwner ||
     data.hotelOwner ||
+    "",
+    hotelPhone:
+    selectedOffer.hotelPhone ||
+    "",
+
+hotelEmail:
+    selectedOffer.hotelEmail ||
+    "",
+
+hotelWebsite:
+    selectedOffer.hotelWebsite ||
     "",
 
         roomName:
@@ -4484,7 +4575,27 @@ function escapeHtml(
         );
 
 }
+// ============================================================
 
+function getHotelCancellationDeadline(checkIn) {
+
+    if (!checkIn) {
+        return "";
+    }
+
+    const date = new Date(checkIn);
+
+    date.setDate(date.getDate() - 2);
+
+    return date.toLocaleDateString(
+        "fr-FR",
+        {
+            day: "numeric",
+            month: "long",
+            year: "numeric"
+        }
+    );
+}
 
 // ============================================================
 // CONSTRUIRE HTML DU DOCUMENT HÔTEL
@@ -4553,9 +4664,23 @@ const country =
 
     const rooms =
         Number(data.rooms || 1);
+        const cancellationDeadline =
+    getHotelCancellationDeadline(
+        data.checkIn
+    );
 
     const refundable =
         data.refundable || null;
+        const cancellationPolicy = `
+Annulation gratuite jusqu'au ${cancellationDeadline}.
+
+Toute annulation effectuée dans les 2 jours précédant
+la date d'arrivée entraînera la facturation de la première nuit.
+
+En cas de non-présentation à l'hôtel ou à l'établissement,
+le montant de la première nuit sera facturé conformément
+à la politique de l'hôtel.
+`;
 
     const customer =
         data.guestName ||
@@ -4600,7 +4725,6 @@ Confirmation réservation hôtel ${escapeHtml(reference)}
 html,
 body {
     width: 210mm;
-    height: 297mm;
     margin: 0;
     padding: 0;
 }
@@ -5102,6 +5226,95 @@ body {
 </div>
 
         </div>
+        <div class="section">
+
+    <div class="section-title">
+        Coordonnées de l'établissement
+    </div>
+
+    <div class="details">
+
+        <div class="row">
+
+            <div class="row-label">
+                Hôtel
+            </div>
+
+            <div class="row-value">
+                ${escapeHtml(hotelName)}
+            </div>
+
+        </div>
+
+        <div class="row">
+
+            <div class="row-label">
+                Adresse
+            </div>
+
+            <div class="row-value">
+                ${escapeHtml(hotelAddress)}
+            </div>
+
+        </div>
+
+        ${
+            data.hotelPhone
+                ? `
+                    <div class="row">
+
+                        <div class="row-label">
+                            Téléphone
+                        </div>
+
+                        <div class="row-value">
+                            ${escapeHtml(data.hotelPhone)}
+                        </div>
+
+                    </div>
+                  `
+                : ""
+        }
+
+        ${
+            data.hotelEmail
+                ? `
+                    <div class="row">
+
+                        <div class="row-label">
+                            Email
+                        </div>
+
+                        <div class="row-value">
+                            ${escapeHtml(data.hotelEmail)}
+                        </div>
+
+                    </div>
+                  `
+                : ""
+        }
+
+        ${
+            data.hotelWebsite
+                ? `
+                    <div class="row">
+
+                        <div class="row-label">
+                            Site web
+                        </div>
+
+                        <div class="row-value">
+                            ${escapeHtml(data.hotelWebsite)}
+                        </div>
+
+                    </div>
+                  `
+                : ""
+        }
+
+    </div>
+
+</div>
 
 
         <div class="section">
@@ -5200,18 +5413,33 @@ body {
 
                 <div class="row">
 
-                    <div class="row-label">
-                        Référence fournisseur
-                    </div>
+    <div class="row-label">
+        Booking ID
+    </div>
 
-                    <div class="row-value">
-                        ${escapeHtml(
-                            data.bookingId ||
-                            reference
-                        )}
-                    </div>
+    <div class="row-value">
+        ${escapeHtml(
+            data.bookingId ||
+            "Non disponible"
+        )}
+    </div>
 
-                </div>
+</div>
+
+<div class="row">
+
+    <div class="row-label">
+        Confirmation Number
+    </div>
+
+    <div class="row-value">
+        ${escapeHtml(
+            data.confirmationNumber ||
+            "Non disponible"
+        )}
+    </div>
+
+</div> 
 
             </div>
 
@@ -5244,6 +5472,82 @@ body {
                 : ""
         }
 
+        <div class="section">
+
+    <div class="section-title">
+        Politique d'annulation
+    </div>
+
+    <div class="notice">
+
+        <strong>
+            Restez flexible !
+        </strong>
+
+        <div style="
+            margin-top:7px;
+            white-space:pre-line;
+        ">
+            ${escapeHtml(cancellationPolicy)}
+        </div>
+
+    </div>
+
+</div>
+<div class="section">
+
+    <div class="section-title">
+        Remarques importantes
+    </div>
+
+    <div class="notice">
+
+        <div style="margin-bottom:7px;">
+            <strong>* IMPORTANT :</strong>
+            Lors de l'enregistrement, vous devez
+            présenter une pièce d'identité officielle
+            avec photo indiquant votre adresse et
+            portant le même nom que celui du client
+            principal indiqué sur la réservation.
+        </div>
+
+        <div style="margin-bottom:7px;">
+            <strong>* Garantie de la chambre :</strong>
+            Toutes les chambres sont garanties pour
+            le jour de l'arrivée. En cas de
+            non-présentation, votre ou vos chambres
+            seront remises à la disposition de
+            l'établissement et vous serez soumis aux
+            conditions de la politique d'annulation
+            ou de non-présentation précisées lors de
+            la réservation ainsi que dans l'e-mail
+            de confirmation.
+        </div>
+
+        <div style="margin-bottom:7px;">
+            <strong>* Prestations supplémentaires :</strong>
+            Le prix total de cette réservation
+            n'inclut pas les consommations du minibar,
+            les communications téléphoniques, le
+            service de blanchisserie, etc.
+            L'établissement vous facturera directement
+            ces prestations.
+        </div>
+
+        <div>
+            <strong>* Petit-déjeuner :</strong>
+            Lorsque le petit-déjeuner est inclus dans
+            le tarif de la chambre, certains
+            établissements peuvent facturer un
+            supplément pour les enfants voyageant avec
+            leurs parents. Le cas échéant,
+            l'établissement vous facturera directement
+            ce supplément.
+        </div>
+
+    </div>
+
+</div>
 
         <div class="notice">
 
@@ -5439,6 +5743,7 @@ async function generateHotelPDF(html) {
 
     }
 }
+
 
 
 // ============================================================
