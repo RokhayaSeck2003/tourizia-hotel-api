@@ -1136,6 +1136,15 @@ async function searchHotelOffers(data) {
 
     const children =
         Number(data.children || 0);
+        // ----------------------------------------------------
+// 🛡️ VALIDATION DES CHAMBRES
+// ----------------------------------------------------
+
+if (rooms > adults) {
+    throw new Error(
+        "Le nombre de chambres ne peut pas dépasser le nombre d'adultes."
+    );
+}
 
     const occupancies = [];
 
