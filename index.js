@@ -4254,6 +4254,38 @@ console.log(
         cancellationDeadline
     }
 );
+
+// ============================================================
+// 🎉 BOOK LITEAPI RÉUSSI → CONFIRMED IMMÉDIATEMENT
+// ============================================================
+
+await updateHotelTransactionStatus(
+    data.transactionId,
+    HOTEL_TRANSACTION_STATUS.CONFIRMED,
+    {
+        "provider.bookingId":
+            bookingId,
+
+        "provider.confirmationNumber":
+            confirmationNumber,
+
+        "provider.hotelId":
+            selectedOffer.hotelId,
+
+        "provider.hotelName":
+            selectedOffer.hotelName,
+
+        "provider.roomName":
+            selectedOffer.roomName,
+
+        confirmedAt:
+            new Date()
+    }
+);
+
+console.log(
+    `🎉 TRANSACTION ${data.transactionId} → CONFIRMED`
+);
     // ========================================================
     // RÉSULTAT FINAL
     // ========================================================
@@ -4417,22 +4449,7 @@ try {
         await generateAndSendHotelConfirmation(
             finalBooking
         );
-        await updateHotelTransactionStatus(
-    data.transactionId,
-    HOTEL_TRANSACTION_STATUS.CONFIRMED,
-    {
-
-        "provider.confirmationNumber":
-            finalBooking.confirmationNumber,
-
-        "provider.bookingId":
-            finalBooking.bookingId,
-
-        pdfUrl:
-            documentResult.pdfUrl || null
-
-    }
-);
+       await updateHotelTransactionStatus
 
     finalBooking.pdfUrl =
         documentResult.pdfUrl;
