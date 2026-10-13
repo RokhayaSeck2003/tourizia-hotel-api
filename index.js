@@ -860,6 +860,77 @@ providerCurrency: null
 
 app.use(express.json());
 // ============================================================
+// 🏨 STATUT TRANSACTION HÔTEL
+// ============================================================
+
+app.get("/api/hotel-transaction-status", async (req, res) => {
+
+    try {
+
+        const transactionId =
+            req.query.transactionId;
+
+        if (!transactionId) {
+            return res.status(400).json({
+                success: false,
+                error: "transactionId manquant"
+            });
+        }
+
+        if (!hotelTransactions) {
+            return res.status(503).json({
+                success: false,
+                error: "MongoDB indisponible"
+            });
+        }
+
+        const transaction =
+            await hotelTransactions.findOne(
+                { transactionId },
+                {
+                    projection: {
+                        transactionId: 1,
+                        status: 1,
+                        provider: 1,
+                        error: 1,
+                        updatedAt: 1
+                    }
+                }
+            );
+
+        if (!transaction) {
+            return res.status(404).json({
+                success: false,
+                error: "Transaction introuvable"
+            });
+        }
+
+        return res.json({
+            success: true,
+            transactionId:
+                transaction.transactionId,
+            status:
+                transaction.status,
+            provider:
+                transaction.provider,
+            error:
+                transaction.error || null
+        });
+
+    } catch (error) {
+
+        console.error(
+            "❌ HOTEL STATUS ERROR:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            error: "Erreur serveur"
+        });
+    }
+});
+// ============================================================
 // LITEAPI HEADERS
 // ============================================================
 
@@ -2419,11 +2490,10 @@ app.post(
             data.email,
 
           success_url:
-            "https://tourizia.com/?hotel_payment=success",
+    `https://tourizia.com/?hotel_payment=success&transactionId=${encodeURIComponent(transactionId)}`,
 
-          cancel_url:
-            "https://tourizia.com/?hotel_payment=cancel",
-
+cancel_url:
+    `https://tourizia.com/?hotel_payment=cancel&transactionId=${encodeURIComponent(transactionId)}`,
           metadata: {
 
             type:
@@ -2694,10 +2764,10 @@ totalPersons:
     "https://tourizia-hotel-api.onrender.com/paytech-hotel-ipn",
 
           success_url:
-            "https://tourizia.com/?hotel_payment=success",
+            `https://tourizia.com/?hotel_payment=success&transactionId=${encodeURIComponent(transactionId)}`,
 
           cancel_url:
-            "https://tourizia.com/?hotel_payment=cancel",
+            `https://tourizia.com/?hotel_payment=cancel&transactionId=${encodeURIComponent(transactionId)}`,
 
           custom_field:
             JSON.stringify(customField)
