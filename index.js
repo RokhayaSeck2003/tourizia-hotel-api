@@ -4748,43 +4748,48 @@ function getHotelCancellationDeadline(checkIn) {
 // CONSTRUIRE HTML DU DOCUMENT HÔTEL
 // ============================================================
 
-// ============================================================
-// TOURIZIA — PDF HÔTEL
-// VERSION FINALE — UNE SEULE PAGE A4
-// ============================================================
-
-function buildHotelPDFHTML(data) {
+function buildHotelPDFHTML(
+    data
+) {
 
     const reference =
         data.confirmationNumber ||
         data.bookingId ||
         generateHotelReference();
 
-    const hotelName =
-        data.hotelName ||
-        "Établissement";
+   const hotelName =
+    data.hotelName ||
+    "Établissement";
 
-    const hotelAddress =
-        data.hotelAddress ||
-        "Adresse non disponible";
+const hotelAddress =
+    data.hotelAddress ||
+    "Adresse non disponible";
 
-    const city =
-        data.city ||
-        "";
+const hotelOwner =
+    data.hotelOwner ||
+    "";
 
-    const country =
-        data.countryCode ||
-        "";
+const roomName =
+    data.roomName ||
+    "Type de chambre non précisé";
 
-    const roomName =
-        data.roomName ||
-        "Chambre";
+const destination =
+    data.city ||
+    "";
+
+const country =
+    data.countryCode ||
+    "";
 
     const checkIn =
-        formatHotelDate(data.checkIn);
+        formatHotelDate(
+            data.checkIn
+        );
 
     const checkOut =
-        formatHotelDate(data.checkOut);
+        formatHotelDate(
+            data.checkOut
+        );
 
     const durationNights =
         Math.max(
@@ -4806,74 +4811,38 @@ function buildHotelPDFHTML(data) {
 
     const rooms =
         Number(data.rooms || 1);
+        const cancellationDeadline =
+    getHotelCancellationDeadline(
+        data.checkIn
+    );
 
-    const totalGuests =
-        adults + children;
+    const refundable =
+        data.refundable || null;
+        const cancellationPolicy = `
+Annulation gratuite jusqu'au ${cancellationDeadline}.
+
+Toute annulation effectuée dans les 2 jours précédant
+la date d'arrivée entraînera la facturation de la première nuit.
+
+En cas de non-présentation à l'hôtel ou à l'établissement,
+le montant de la première nuit sera facturé conformément
+à la politique de l'hôtel.
+`;
 
     const customer =
         data.guestName ||
         data.fullName ||
         "Client Tourizia";
 
-    const bookingId =
-        data.bookingId ||
-        "Non disponible";
+    const guestType =
+        data.guestType ||
+        "adult";
 
-    const confirmationNumber =
-        data.confirmationNumber ||
-        "Non disponible";
+    const guestNumber =
+        Number(data.guestNumber || 1);
 
-    // --------------------------------------------------------
-    // VOYAGEURS
-    // --------------------------------------------------------
-
-    let guestsText = "";
-
-    if (Array.isArray(data.guests) && data.guests.length) {
-
-        guestsText = data.guests
-            .map((guest) => {
-
-                const firstName =
-                    guest.firstName || "";
-
-                const lastName =
-                    guest.lastName || "";
-
-                return `${firstName} ${lastName}`.trim();
-
-            })
-            .filter(Boolean)
-            .join(" • ");
-
-    }
-
-    // --------------------------------------------------------
-    // CONDITIONS TARIFAIRES
-    // --------------------------------------------------------
-
-    let tariffText = "";
-
-    if (data.refundable) {
-
-        if (typeof data.refundable === "string") {
-
-            tariffText =
-                data.refundable;
-
-        } else {
-
-            tariffText =
-                "Tarif avec conditions d'annulation.";
-
-        }
-
-    } else {
-
-        tariffText =
-            "Voir les conditions applicables à la réservation.";
-
-    }
+    const totalGuests =
+        Number(data.totalGuests || 1);
 
     return `
 
@@ -4886,7 +4855,7 @@ function buildHotelPDFHTML(data) {
 <meta charset="UTF-8">
 
 <title>
-Confirmation hôtel ${escapeHtml(reference)}
+Confirmation réservation hôtel ${escapeHtml(reference)}
 </title>
 
 <style>
@@ -4902,13 +4871,9 @@ Confirmation hôtel ${escapeHtml(reference)}
 
 html,
 body {
-
     width: 210mm;
-    height: 297mm;
-
     margin: 0;
     padding: 0;
-
 }
 
 body {
@@ -4925,23 +4890,17 @@ body {
 }
 
 .page {
-
     width: 210mm;
     height: 297mm;
-
-    padding: 12mm 14mm;
-
-    background: #ffffff;
-
+    margin: 0;
+    padding: 10mm 12mm;
     overflow: hidden;
-
+    background: #ffffff;
 }
 
-/* =========================================================
-   HEADER
-========================================================= */
-
 .header {
+
+    padding: 18px 30px;
 
     background:
         linear-gradient(
@@ -4952,157 +4911,121 @@ body {
 
     color: #ffffff;
 
-    border-radius: 10px;
-
-    padding: 14px 18px;
-
 }
 
 .logo {
 
-    font-size: 24px;
+    font-size: 27px;
 
     font-weight: 800;
 
-    letter-spacing: .3px;
+}
+
+.header-subtitle {
+
+    margin-top: 5px;
+
+    font-size: 13px;
 
 }
 
-.subtitle {
+.reference {
 
-    margin-top: 3px;
+    margin-top: 11px;
 
-    font-size: 11px;
-
-    opacity: .95;
-
-}
-
-.header-bottom {
-
-    margin-top: 10px;
-
-    padding-top: 9px;
+    padding-top: 11px;
 
     border-top:
         1px solid
-        rgba(255,255,255,.30);
+        rgba(255,255,255,0.30);
 
     display: flex;
 
     justify-content:
         space-between;
 
-    align-items: center;
+}
+
+.reference-label {
+
+    font-size: 10px;
+
+    text-transform:
+        uppercase;
+
+    opacity: .8;
 
 }
 
-.ref-label {
-
-    font-size: 8px;
-
-    text-transform: uppercase;
-
-    opacity: .80;
-
-}
-
-.ref-value {
-
-    margin-top: 2px;
-
-    font-size: 14px;
-
-    font-weight: 800;
-
-}
-
-.confirmed {
-
-    background: #ffffff;
-
-    color: #087f91;
-
-    padding: 5px 9px;
-
-    border-radius: 20px;
-
-    font-size: 9px;
-
-    font-weight: 800;
-
-}
-
-/* =========================================================
-   CONTENT
-========================================================= */
-
-.content {
-
-    margin-top: 11px;
-
-}
-
-/* =========================================================
-   HOTEL
-========================================================= */
-
-.hotel-box {
-
-    border:
-        1px solid #e3e8ec;
-
-    border-radius: 9px;
-
-    padding: 11px 13px;
-
-}
-
-.hotel-title {
-
-    font-size: 17px;
-
-    font-weight: 800;
-
-}
-
-.hotel-location {
+.reference-value {
 
     margin-top: 3px;
 
-    font-size: 10px;
+    font-size: 17px;
 
-    color: #65727c;
-
-}
-
-.hotel-address {
-
-    margin-top: 6px;
-
-    font-size: 10px;
-
-    color: #4d5a64;
+    font-weight: 700;
 
 }
 
-/* =========================================================
-   SECTIONS
-========================================================= */
+.content {
 
-.section {
-
-    margin-top: 9px;
+    padding: 20px 30px;
 
 }
 
-.section-title {
+.status {
 
-    margin-bottom: 5px;
+    display: inline-block;
+
+    padding: 5px 12px;
+
+    border-radius: 30px;
+
+    background: #e8f8f3;
+
+    color: #16805d;
+
+    font-weight: 700;
 
     font-size: 11px;
 
+    margin-bottom: 14px;
+
+}
+
+.hotel-name {
+
+    font-size: 22px;
+
     font-weight: 800;
+
+    margin-bottom: 4px;
+
+}
+
+.location {
+
+    color: #687580;
+
+    font-size: 12px;
+
+    line-height: 1.5;
+
+    margin-bottom: 6px;
+
+}
+
+.hotel-owner {
+
+    font-size: 11px;
+
+    color: #7a858e;
+
+    margin-bottom: 15px;
+
+}
+
+.hotel-owner strong {
 
     color: #17212b;
 
@@ -5115,53 +5038,64 @@ body {
     grid-template-columns:
         1fr 1fr;
 
-    gap: 6px;
+    gap: 8px;
 
 }
 
 .card {
 
     border:
-        1px solid #e3e8ec;
+        1px solid #e5e9ed;
 
-    border-radius: 8px;
+    border-radius: 12px;
 
-    padding: 8px 10px;
+    padding: 11px 13px;
 
 }
 
 .label {
 
-    font-size: 8px;
+    font-size: 10px;
 
-    color: #7b858d;
+    text-transform:
+        uppercase;
 
-    text-transform: uppercase;
+    color: #7a858e;
+
+    margin-bottom: 4px;
 
 }
 
 .value {
 
-    margin-top: 3px;
-
-    font-size: 11px;
+    font-size: 14px;
 
     font-weight: 700;
 
-    color: #17212b;
+}
+
+.section {
+
+    margin-top: 14px;
 
 }
 
-/* =========================================================
-   DETAILS
-========================================================= */
+.section-title {
+
+    font-size: 15px;
+
+    font-weight: 800;
+
+    margin-bottom: 7px;
+
+}
 
 .details {
 
     border:
-        1px solid #e3e8ec;
+        1px solid #e5e9ed;
 
-    border-radius: 8px;
+    border-radius: 12px;
 
     overflow: hidden;
 
@@ -5174,14 +5108,12 @@ body {
     justify-content:
         space-between;
 
-    align-items: center;
-
-    padding: 5px 9px;
+    padding: 7px 13px;
 
     border-bottom:
         1px solid #edf0f2;
 
-    font-size: 9px;
+    font-size: 12px;
 
 }
 
@@ -5193,7 +5125,7 @@ body {
 
 .row-label {
 
-    color: #707c85;
+    color: #6c7882;
 
 }
 
@@ -5203,108 +5135,37 @@ body {
 
     text-align: right;
 
-    max-width: 65%;
-
 }
-
-/* =========================================================
-   VOYAGEURS
-========================================================= */
-
-.guests-box {
-
-    border:
-        1px solid #e3e8ec;
-
-    border-radius: 8px;
-
-    padding: 8px 10px;
-
-}
-
-.guests-main {
-
-    font-size: 10px;
-
-    font-weight: 700;
-
-}
-
-.guests-list {
-
-    margin-top: 5px;
-
-    font-size: 8.5px;
-
-    color: #69757e;
-
-    line-height: 1.35;
-
-}
-
-/* =========================================================
-   CONDITIONS
-========================================================= */
 
 .notice {
 
-    background: #f5f8fa;
+    margin-top: 13px;
 
-    border-radius: 8px;
+    padding: 10px 13px;
 
-    padding: 8px 10px;
+    background: #f3f8fa;
 
-    font-size: 8.5px;
+    border-radius: 12px;
 
     color: #53616c;
 
-    line-height: 1.35;
-
-}
-
-/* =========================================================
-   IMPORTANT
-========================================================= */
-
-.important {
-
-    background: #fff8e8;
-
-    border-left:
-        3px solid #e7a800;
-
-    border-radius: 7px;
-
-    padding: 7px 9px;
-
-    font-size: 8.5px;
-
-    color: #5d5542;
+    font-size: 10px;
 
     line-height: 1.35;
 
 }
-
-/* =========================================================
-   FOOTER
-========================================================= */
 
 .footer {
 
-    margin-top: 9px;
+    padding: 11px 30px;
 
-    padding-top: 8px;
-
-    border-top:
-        1px solid #e5e9ed;
-
-    text-align: center;
-
-    font-size: 8px;
+    background: #f7f9fa;
 
     color: #7b858d;
 
-    line-height: 1.4;
+    font-size: 9px;
+
+    line-height: 1.3;
 
 }
 
@@ -5322,36 +5183,40 @@ body {
 
 <div class="page">
 
-    <!-- =====================================================
-         HEADER
-    ====================================================== -->
-
     <div class="header">
 
         <div class="logo">
             TOURIZIA
         </div>
 
-        <div class="subtitle">
+        <div class="header-subtitle">
             Confirmation de réservation hôtel
         </div>
 
-        <div class="header-bottom">
+        <div class="reference">
 
             <div>
 
-                <div class="ref-label">
-                    Référence de réservation
+                <div class="reference-label">
+                    Référence
                 </div>
 
-                <div class="ref-value">
+                <div class="reference-value">
                     ${escapeHtml(reference)}
                 </div>
 
             </div>
 
-            <div class="confirmed">
-                ✓ CONFIRMÉE
+            <div style="text-align:right">
+
+                <div class="reference-label">
+                    Statut
+                </div>
+
+                <div class="reference-value">
+                    Confirmée
+                </div>
+
             </div>
 
         </div>
@@ -5361,157 +5226,241 @@ body {
 
     <div class="content">
 
-        <!-- =================================================
-             HÔTEL
-        ================================================== -->
+        <div class="status">
+            ✓ RÉSERVATION CONFIRMÉE
+        </div>
 
-        <div class="hotel-box">
 
-            <div class="hotel-title">
+       <div class="hotel-name">
+    Destination
+</div>
+
+<div class="location">
+    ${escapeHtml(destination)}
+    ${country ? " — " + escapeHtml(country) : ""}
+</div>
+
+<div
+    style="
+        margin-top:12px;
+        font-size:13px;
+        color:#53616c;
+        line-height:1.5;
+    "
+>
+    <strong>Hôtel :</strong>
+    ${escapeHtml(hotelName)}
+</div>
+
+<div
+    style="
+        margin-top:6px;
+        font-size:13px;
+        color:#53616c;
+        line-height:1.5;
+    "
+>
+    <strong>Adresse :</strong>
+    ${escapeHtml(hotelAddress)}
+</div>
+
+
+        ${
+            hotelOwner
+                ? `
+                    <div class="hotel-owner">
+                        Propriétaire :
+                        <strong>
+                            ${escapeHtml(hotelOwner)}
+                        </strong>
+                    </div>
+                  `
+                : ""
+        }
+
+
+        <div class="grid">
+
+            <div class="card">
+
+                <div class="label">
+                    Arrivée
+                </div>
+
+                <div class="value">
+                    ${escapeHtml(checkIn)}
+                </div>
+
+            </div>
+
+
+            <div class="card">
+
+                <div class="label">
+                    Départ
+                </div>
+
+                <div class="value">
+                    ${escapeHtml(checkOut)}
+                </div>
+
+            </div>
+
+
+            <div class="card">
+
+                <div class="label">
+                    Voyageur
+                </div>
+
+                <div class="value">
+                    ${escapeHtml(customer)}
+                </div>
+
+                <div
+                    style="
+                        margin-top:6px;
+                        font-size:11px;
+                        color:#6c7882;
+                    "
+                >
+                    Personne
+                    ${guestNumber}
+                    sur
+                    ${totalGuests}
+                </div>
+
+                <div
+                    style="
+                        margin-top:3px;
+                        font-size:11px;
+                        color:#6c7882;
+                    "
+                >
+                    ${
+                        guestType === "child"
+                            ? "Enfant"
+                            : "Adulte"
+                    }
+                </div>
+
+            </div>
+
+
+            <div class="card">
+
+    <div class="label">
+        Adresse de l'établissement
+    </div>
+
+    <div
+        class="value"
+        style="
+            font-size:12px;
+            line-height:1.45;
+        "
+    >
+        ${escapeHtml(hotelAddress)}
+    </div>
+
+</div>
+
+        </div>
+        <div class="section">
+
+    <div class="section-title">
+        Coordonnées de l'établissement
+    </div>
+
+    <div class="details">
+
+        <div class="row">
+
+            <div class="row-label">
+                Hôtel
+            </div>
+
+            <div class="row-value">
                 ${escapeHtml(hotelName)}
             </div>
 
-            <div class="hotel-location">
+        </div>
 
-                ${escapeHtml(city)}
+        <div class="row">
 
-                ${
-                    country
-                        ? ` — ${escapeHtml(country)}`
-                        : ""
-                }
-
+            <div class="row-label">
+                Adresse
             </div>
 
-            <div class="hotel-address">
-
-                <strong>Adresse :</strong>
-
+            <div class="row-value">
                 ${escapeHtml(hotelAddress)}
-
             </div>
 
         </div>
 
+        ${
+            data.hotelPhone
+                ? `
+                    <div class="row">
 
-        <!-- =================================================
-             SÉJOUR
-        ================================================== -->
+                        <div class="row-label">
+                            Téléphone
+                        </div>
+
+                        <div class="row-value">
+                            ${escapeHtml(data.hotelPhone)}
+                        </div>
+
+                    </div>
+                  `
+                : ""
+        }
+
+        ${
+            data.hotelEmail
+                ? `
+                    <div class="row">
+
+                        <div class="row-label">
+                            Email
+                        </div>
+
+                        <div class="row-value">
+                            ${escapeHtml(data.hotelEmail)}
+                        </div>
+
+                    </div>
+                  `
+                : ""
+        }
+
+        ${
+            data.hotelWebsite
+                ? `
+                    <div class="row">
+
+                        <div class="row-label">
+                            Site web
+                        </div>
+
+                        <div class="row-value">
+                            ${escapeHtml(data.hotelWebsite)}
+                        </div>
+
+                    </div>
+                  `
+                : ""
+        }
+
+    </div>
+
+</div>
+
 
         <div class="section">
 
             <div class="section-title">
-                📅 Détails du séjour
-            </div>
-
-            <div class="grid">
-
-                <div class="card">
-
-                    <div class="label">
-                        Arrivée
-                    </div>
-
-                    <div class="value">
-                        ${escapeHtml(checkIn)}
-                    </div>
-
-                </div>
-
-                <div class="card">
-
-                    <div class="label">
-                        Départ
-                    </div>
-
-                    <div class="value">
-                        ${escapeHtml(checkOut)}
-                    </div>
-
-                </div>
-
-                <div class="card">
-
-                    <div class="label">
-                        Durée
-                    </div>
-
-                    <div class="value">
-
-                        ${durationNights}
-                        nuit${durationNights > 1 ? "s" : ""}
-
-                    </div>
-
-                </div>
-
-                <div class="card">
-
-                    <div class="label">
-                        Chambre
-                    </div>
-
-                    <div class="value">
-                        ${escapeHtml(roomName)}
-                    </div>
-
-                </div>
-
-            </div>
-
-        </div>
-
-
-        <!-- =================================================
-             VOYAGEUR
-        ================================================== -->
-
-        <div class="section">
-
-            <div class="section-title">
-                👤 Voyageur
-            </div>
-
-            <div class="guests-box">
-
-                <div class="guests-main">
-
-                    Client principal :
-                    ${escapeHtml(customer)}
-
-                </div>
-
-                <div class="guests-list">
-
-                    ${adults} adulte${adults > 1 ? "s" : ""}
-                    •
-                    ${children} enfant${children > 1 ? "s" : ""}
-                    •
-                    ${totalGuests} voyageur${totalGuests > 1 ? "s" : ""}
-                    •
-                    ${rooms} chambre${rooms > 1 ? "s" : ""}
-
-                    ${
-                        guestsText
-                            ? `<br>${escapeHtml(guestsText)}`
-                            : ""
-                    }
-
-                </div>
-
-            </div>
-
-        </div>
-
-
-        <!-- =================================================
-             RÉSERVATION
-        ================================================== -->
-
-        <div class="section">
-
-            <div class="section-title">
-                🔖 Informations de réservation
+                Détails du séjour
             </div>
 
             <div class="details">
@@ -5519,38 +5468,75 @@ body {
                 <div class="row">
 
                     <div class="row-label">
-                        Référence
+                        Durée
                     </div>
 
                     <div class="row-value">
-                        ${escapeHtml(reference)}
+
+                        ${durationNights}
+
+                        nuit${
+                            durationNights > 1
+                                ? "s"
+                                : ""
+                        }
+
                     </div>
 
                 </div>
+
 
                 <div class="row">
 
                     <div class="row-label">
-                        Booking ID
+                        Chambres
                     </div>
 
                     <div class="row-value">
-                        ${escapeHtml(bookingId)}
+                        ${rooms}
                     </div>
 
                 </div>
+
 
                 <div class="row">
 
                     <div class="row-label">
-                        Confirmation
+                        Voyageurs
                     </div>
 
                     <div class="row-value">
-                        ${escapeHtml(confirmationNumber)}
+                        ${adults + children}
                     </div>
 
                 </div>
+
+
+                <div class="row">
+
+                    <div class="row-label">
+                        Adultes
+                    </div>
+
+                    <div class="row-value">
+                        ${adults}
+                    </div>
+
+                </div>
+
+
+                <div class="row">
+
+                    <div class="row-label">
+                        Enfants
+                    </div>
+
+                    <div class="row-value">
+                        ${children}
+                    </div>
+
+                </div>
+
 
                 <div class="row">
 
@@ -5564,85 +5550,164 @@ body {
 
                 </div>
 
-            </div>
 
-        </div>
+                <div class="row">
 
+    <div class="row-label">
+        Booking ID
+    </div>
 
-        <!-- =================================================
-             CONDITIONS
-        ================================================== -->
+    <div class="row-value">
+        ${escapeHtml(
+            data.bookingId ||
+            "Non disponible"
+        )}
+    </div>
 
-        <div class="section">
+</div>
 
-            <div class="section-title">
-                🔄 Conditions tarifaires
-            </div>
+<div class="row">
 
-            <div class="notice">
+    <div class="row-label">
+        Confirmation Number
+    </div>
 
-                ${escapeHtml(tariffText)}
+    <div class="row-value">
+        ${escapeHtml(
+            data.confirmationNumber ||
+            "Non disponible"
+        )}
+    </div>
 
-            </div>
-
-        </div>
-
-
-        <!-- =================================================
-             IMPORTANT
-        ================================================== -->
-
-        <div class="section">
-
-            <div class="section-title">
-                ℹ️ Informations importantes
-            </div>
-
-            <div class="important">
-
-                • Présentez une pièce d'identité officielle
-                lors de votre arrivée.
-
-                <br>
-
-                • Les prestations supplémentaires non incluses
-                dans le tarif peuvent être facturées directement
-                par l'établissement.
-
-                <br>
-
-                • En cas de non-présentation, les conditions
-                applicables à la réservation peuvent s'appliquer.
+</div> 
 
             </div>
 
         </div>
 
 
-        <!-- =================================================
-             CONFIRMATION
-        ================================================== -->
+        ${
+            refundable
+                ? `
+                    <div class="section">
+
+                        <div class="section-title">
+                            Conditions tarifaires
+                        </div>
+
+                        <div class="notice">
+
+                            ${escapeHtml(
+                                typeof refundable === "string"
+                                    ? refundable
+                                    : JSON.stringify(
+                                        refundable
+                                    )
+                            )}
+
+                        </div>
+
+                    </div>
+                  `
+                : ""
+        }
 
         <div class="section">
 
-            <div class="notice">
+    <div class="section-title">
+        Politique d'annulation
+    </div>
 
-                <strong>
-                    Réservation confirmée
-                </strong>
+    <div class="notice">
 
-                <br>
+        <strong>
+            Restez flexible !
+        </strong>
 
-                Ce document constitue votre confirmation
-                de réservation hôtel auprès de Tourizia.
+        <div style="
+            margin-top:7px;
+            white-space:pre-line;
+        ">
+            ${escapeHtml(cancellationPolicy)}
+        </div>
 
-                <br>
+    </div>
 
-                Veuillez conserver votre référence :
+</div>
+<div class="section">
 
-                <strong>
-                    ${escapeHtml(reference)}
-                </strong>
+    <div class="section-title">
+        Remarques importantes
+    </div>
+
+    <div class="notice">
+
+        <div style="margin-bottom:7px;">
+            <strong>* IMPORTANT :</strong>
+            Lors de l'enregistrement, vous devez
+            présenter une pièce d'identité officielle
+            avec photo indiquant votre adresse et
+            portant le même nom que celui du client
+            principal indiqué sur la réservation.
+        </div>
+
+        <div style="margin-bottom:7px;">
+            <strong>* Garantie de la chambre :</strong>
+            Toutes les chambres sont garanties pour
+            le jour de l'arrivée. En cas de
+            non-présentation, votre ou vos chambres
+            seront remises à la disposition de
+            l'établissement et vous serez soumis aux
+            conditions de la politique d'annulation
+            ou de non-présentation précisées lors de
+            la réservation ainsi que dans l'e-mail
+            de confirmation.
+        </div>
+
+        <div style="margin-bottom:7px;">
+            <strong>* Prestations supplémentaires :</strong>
+            Le prix total de cette réservation
+            n'inclut pas les consommations du minibar,
+            les communications téléphoniques, le
+            service de blanchisserie, etc.
+            L'établissement vous facturera directement
+            ces prestations.
+        </div>
+
+        <div>
+            <strong>* Petit-déjeuner :</strong>
+            Lorsque le petit-déjeuner est inclus dans
+            le tarif de la chambre, certains
+            établissements peuvent facturer un
+            supplément pour les enfants voyageant avec
+            leurs parents. Le cas échéant,
+            l'établissement vous facturera directement
+            ce supplément.
+        </div>
+
+    </div>
+
+</div>
+
+        <div class="notice">
+
+            <strong>
+                Important
+            </strong>
+
+            <div style="margin-top:5px;">
+
+                Ce document confirme la réservation
+                traitée par Tourizia auprès de son
+                fournisseur hôtelier.
+
+            </div>
+
+            <div style="margin-top:4px;">
+
+                Veuillez conserver ce document et
+                présenter votre référence de réservation
+                lors de votre séjour.
 
             </div>
 
@@ -5651,18 +5716,18 @@ body {
     </div>
 
 
-    <!-- =====================================================
-         FOOTER
-    ====================================================== -->
-
     <div class="footer">
 
-        <strong>TOURIZIA</strong>
+        <strong>
+            TOURIZIA
+        </strong>
+
         — Votre réservation hôtel est confirmée.
 
         <br>
 
-        Merci d'avoir choisi Tourizia.
+        Pour toute question concernant votre
+        réservation, contactez le support Tourizia.
 
     </div>
 
@@ -5796,19 +5861,18 @@ async function generateHotelPDF(html) {
     }
 );
 
-        const pdf =
-            await page.pdf({
-                format: "A4",
-                printBackground: true,
-                preferCSSPageSize: true,
-                scale: 0.90,
-                margin: {
-                    top: "0",
-                    right: "0",
-                    bottom: "0",
-                    left: "0"
-                }
-            });
+        const pdf = await page.pdf({
+    format: "A4",
+    printBackground: true,
+    preferCSSPageSize: true,
+    scale: 0.82,
+    margin: {
+        top: "0",
+        right: "0",
+        bottom: "0",
+        left: "0"
+    }
+});
 
         return pdf;
 
