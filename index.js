@@ -1680,9 +1680,6 @@ async function findPrebookableOffer(data) {
 
     for (const offer of offers) {
 
-        try {
-            for (const offer of offers) {
-
     // ----------------------------------------------------
     // 🛡️ VÉRIFICATION POLITIQUE D'ANNULATION TOURIZIA
     // ----------------------------------------------------
@@ -1696,6 +1693,9 @@ async function findPrebookableOffer(data) {
 
         continue;
     }
+
+        try {
+            
 
             console.log(
                 "🏨 VÉRIFICATION HÔTEL:",
