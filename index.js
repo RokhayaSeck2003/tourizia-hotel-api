@@ -1618,13 +1618,47 @@ async function prebookHotelOffer(offerId) {
     return result;
 
 }
+// ============================================================
+// true  → offre acceptable pour Tourizia
+// false → offre non acceptable pour Tourizia
+// ============================================================
 
+function isTouriziaCancellationCompatible(offer) {
+    if (!offer) return false;
 
+    const policies = offer.cancellationPolicies;
+
+    // Pas d'information fiable sur l'annulation
+    // → Tourizia ne prend pas le risque
+    if (!policies) {
+        return false;
+    }
+
+    // Offre explicitement non remboursable
+    if (
+        offer.refundable === false ||
+        offer.refundable === "NON_REFUNDABLE" ||
+        offer.refundable === "non_refundable"
+    ) {
+        return false;
+    }
+
+    // Vérification du refundableTag LiteAPI
+    if (
+        offer.refundable === "NRF" ||
+        offer.refundable === "NONREFUNDABLE"
+    ) {
+        return false;
+    }
+
+    return true;
+}
 // ============================================================
 // 🔎 SÉLECTION D'UNE OFFRE AVEC ADRESSE VÉRIFIÉE
 // ============================================================
 
 async function findPrebookableOffer(data) {
+    
 
     console.log(
         "🔎 RECHERCHE D'UNE OFFRE AVEC ADRESSE PRÉCISE..."
@@ -1642,9 +1676,26 @@ async function findPrebookableOffer(data) {
         );
     }
 
+    
+
     for (const offer of offers) {
 
         try {
+            for (const offer of offers) {
+
+    // ----------------------------------------------------
+    // 🛡️ VÉRIFICATION POLITIQUE D'ANNULATION TOURIZIA
+    // ----------------------------------------------------
+
+    if (!isTouriziaCancellationCompatible(offer)) {
+
+        console.log(
+            "🚫 OFFRE REFUSÉE — POLITIQUE D'ANNULATION TROP RISQUÉE:",
+            offer.offerId
+        );
+
+        continue;
+    }
 
             console.log(
                 "🏨 VÉRIFICATION HÔTEL:",
