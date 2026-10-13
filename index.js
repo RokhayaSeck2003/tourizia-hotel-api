@@ -4825,6 +4825,8 @@ function escapeHtml(
 
 }
 // ============================================================
+// DÉLAI D'ANNULATION HÔTEL     
+// ============================================================
 
 function getHotelCancellationDeadline(checkIn) {
 
@@ -4843,6 +4845,72 @@ function getHotelCancellationDeadline(checkIn) {
             month: "long",
             year: "numeric"
         }
+    );
+}
+// ============================================================
+// 🌍 NOM COMPLET DU PAYS POUR LE PDF
+// ============================================================
+
+function getHotelCountryName(countryCode) {
+
+    const code =
+        String(countryCode || "")
+            .trim()
+            .toUpperCase();
+
+    if (!code) {
+        return "";
+    }
+
+    try {
+
+        const displayNames =
+            new Intl.DisplayNames(
+                ["fr"],
+                {
+                    type: "region"
+                }
+            );
+
+        const name =
+            displayNames.of(code);
+
+        if (name) {
+            return name;
+        }
+
+    } catch (error) {
+
+        console.warn(
+            "⚠️ Impossible de convertir le pays:",
+            code
+        );
+
+    }
+
+    // Fallback
+    const countries = {
+
+        FR: "France",
+        ES: "Espagne",
+        SN: "Sénégal",
+        GB: "Royaume-Uni",
+        IT: "Italie",
+        PT: "Portugal",
+        DE: "Allemagne",
+        BE: "Belgique",
+        CH: "Suisse",
+        MA: "Maroc",
+        TR: "Turquie",
+        AE: "Émirats arabes unis",
+        US: "États-Unis",
+        CA: "Canada"
+
+    };
+
+    return (
+        countries[code] ||
+        countryCode
     );
 }
 
@@ -4866,6 +4934,15 @@ function buildHotelPDFHTML(
 const hotelAddress =
     data.hotelAddress ||
     "Adresse non disponible";
+    const hotelAddressForPdf =
+    hotelAddress
+        .replace(
+            new RegExp(
+                `,\\s*${String(data.countryCode || "").trim()}$`,
+                "i"
+            ),
+            `, ${country}`
+        );
 
 const hotelOwner =
     data.hotelOwner ||
@@ -4880,8 +4957,9 @@ const destination =
     "";
 
 const country =
-    data.countryCode ||
-    "";
+    getHotelCountryName(
+        data.countryCode
+    );
 
     const checkIn =
         formatHotelDate(
@@ -5668,19 +5746,6 @@ body {
 
 </div>
 
-<div class="row">
-
-    <div class="row-label">
-        Confirmation Number
-    </div>
-
-    <div class="row-value">
-        ${escapeHtml(
-            data.confirmationNumber ||
-            "Non disponible"
-        )}
-    </div>
-
 </div> 
 
             </div>
@@ -5739,52 +5804,33 @@ body {
 <div class="section">
 
     <div class="section-title">
-        Remarques importantes
+        Remarques
     </div>
 
     <div class="notice">
 
-        <div style="margin-bottom:7px;">
+        <div style="margin-bottom:6px;">
             <strong>* IMPORTANT :</strong>
-            Lors de l'enregistrement, vous devez
-            présenter une pièce d'identité officielle
-            avec photo indiquant votre adresse et
-            portant le même nom que celui du client
-            principal indiqué sur la réservation.
+            Présentez à l'arrivée une pièce d'identité officielle
+            avec photo et portant le même nom que le client principal.
         </div>
 
-        <div style="margin-bottom:7px;">
-            <strong>* Garantie de la chambre :</strong>
-            Toutes les chambres sont garanties pour
-            le jour de l'arrivée. En cas de
-            non-présentation, votre ou vos chambres
-            seront remises à la disposition de
-            l'établissement et vous serez soumis aux
-            conditions de la politique d'annulation
-            ou de non-présentation précisées lors de
-            la réservation ainsi que dans l'e-mail
-            de confirmation.
+        <div style="margin-bottom:6px;">
+            <strong>* Non-présentation :</strong>
+            Toute chambre non utilisée pourra être remise à disposition
+            de l'établissement selon sa politique d'annulation.
         </div>
 
-        <div style="margin-bottom:7px;">
-            <strong>* Prestations supplémentaires :</strong>
-            Le prix total de cette réservation
-            n'inclut pas les consommations du minibar,
-            les communications téléphoniques, le
-            service de blanchisserie, etc.
-            L'établissement vous facturera directement
-            ces prestations.
+        <div style="margin-bottom:6px;">
+            <strong>* Frais supplémentaires :</strong>
+            Minibar, téléphone, blanchisserie et autres consommations
+            ne sont pas inclus et seront facturés directement par l'hôtel.
         </div>
 
         <div>
             <strong>* Petit-déjeuner :</strong>
-            Lorsque le petit-déjeuner est inclus dans
-            le tarif de la chambre, certains
-            établissements peuvent facturer un
-            supplément pour les enfants voyageant avec
-            leurs parents. Le cas échéant,
-            l'établissement vous facturera directement
-            ce supplément.
+            Un supplément peut être demandé pour les enfants.
+            Renseignez-vous auprès de l'établissement à votre arrivée.
         </div>
 
     </div>
