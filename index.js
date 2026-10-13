@@ -1703,35 +1703,137 @@ async function prebookHotelOffer(offerId) {
 // false → offre non acceptable pour Tourizia
 // ============================================================
 
+// ============================================================
+// 🛡️ POLITIQUE D'ANNULATION TOURIZIA
+// ============================================================
+// true  → offre acceptable
+// false → offre refusée
+//
+// Règles Tourizia :
+// - NRFN = non remboursable → REFUS
+// - NRF / NONREFUNDABLE → REFUS
+// - absence de politique fiable → REFUS
+// - RFN + politique d'annulation → ACCEPTÉ
+// ============================================================
+
 function isTouriziaCancellationCompatible(offer) {
-    if (!offer) return false;
 
-    const policies = offer.cancellationPolicies;
-
-    // Pas d'information fiable sur l'annulation
-    // → Tourizia ne prend pas le risque
-    if (!policies) {
+    if (!offer) {
         return false;
     }
 
-    // Offre explicitement non remboursable
+    const policies =
+        offer.cancellationPolicies;
+
+    // --------------------------------------------------------
+    // 1. Politique absente
+    // --------------------------------------------------------
+
+    if (!policies) {
+
+        console.log(
+            "🚫 ANNULATION REFUSÉE — politique absente:",
+            offer.offerId
+        );
+
+        return false;
+    }
+
+    // --------------------------------------------------------
+    // 2. Lire le vrai refundableTag LiteAPI
+    // --------------------------------------------------------
+
+    const refundableTag =
+        String(
+            policies.refundableTag ||
+            offer.refundable ||
+            ""
+        )
+        .trim()
+        .toUpperCase();
+
+    // --------------------------------------------------------
+    // 3. NON REMBOURSABLE
+    // --------------------------------------------------------
+
+    if (
+        refundableTag === "NRFN" ||
+        refundableTag === "NRF" ||
+        refundableTag === "NONREFUNDABLE" ||
+        refundableTag === "NON_REFUNDABLE"
+    ) {
+
+        console.log(
+            "🚫 ANNULATION REFUSÉE — offre non remboursable:",
+            offer.offerId,
+            refundableTag
+        );
+
+        return false;
+    }
+
+    // --------------------------------------------------------
+    // 4. Vérification explicite de refundable
+    // --------------------------------------------------------
+
     if (
         offer.refundable === false ||
-        offer.refundable === "NON_REFUNDABLE" ||
-        offer.refundable === "non_refundable"
+        String(offer.refundable || "")
+            .trim()
+            .toUpperCase() === "NON_REFUNDABLE"
     ) {
+
+        console.log(
+            "🚫 ANNULATION REFUSÉE — refundable=false:",
+            offer.offerId
+        );
+
         return false;
     }
 
-    // Vérification du refundableTag LiteAPI
-    if (
-        offer.refundable === "NRF" ||
-        offer.refundable === "NONREFUNDABLE"
-    ) {
-        return false;
+    // --------------------------------------------------------
+    // 5. Une offre RFN doit avoir une vraie politique
+    // --------------------------------------------------------
+
+    if (refundableTag === "RFN") {
+
+        const infos =
+            Array.isArray(
+                policies.cancelPolicyInfos
+            )
+                ? policies.cancelPolicyInfos
+                : [];
+
+        if (!infos.length) {
+
+            console.log(
+                "🚫 ANNULATION REFUSÉE — RFN sans cancelPolicyInfos:",
+                offer.offerId
+            );
+
+            return false;
+        }
+
+        // Une politique exploitable existe
+        console.log(
+            "✅ ANNULATION ACCEPTÉE — RFN:",
+            offer.offerId
+        );
+
+        return true;
     }
 
-    return true;
+    // --------------------------------------------------------
+    // 6. Tag inconnu
+    // --------------------------------------------------------
+
+    console.log(
+        "🚫 ANNULATION REFUSÉE — refundableTag inconnu:",
+        offer.offerId,
+        refundableTag || "(vide)"
+    );
+
+    return false;
 }
 // ============================================================
 // 🔎 SÉLECTION D'UNE OFFRE AVEC ADRESSE VÉRIFIÉE
