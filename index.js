@@ -4934,15 +4934,7 @@ function buildHotelPDFHTML(
 const hotelAddress =
     data.hotelAddress ||
     "Adresse non disponible";
-    const hotelAddressForPdf =
-    hotelAddress
-        .replace(
-            new RegExp(
-                `,\\s*${String(data.countryCode || "").trim()}$`,
-                "i"
-            ),
-            `, ${country}`
-        );
+
 
 const hotelOwner =
     data.hotelOwner ||
@@ -4956,10 +4948,19 @@ const destination =
     data.city ||
     "";
 
-const country =
-    getHotelCountryName(
-        data.countryCode
-    );
+ // ✅ PAYS AVANT TOUTE UTILISATION
+    const country =
+        getHotelCountryName(data.countryCode);
+
+    const hotelAddressForPdf =
+        hotelAddress.replace(
+            new RegExp(
+                `,\\s*${String(data.countryCode || "").trim()}$`,
+                "i"
+            ),
+            `, ${country}`
+        );
+
 
     const checkIn =
         formatHotelDate(
