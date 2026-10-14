@@ -1840,336 +1840,435 @@ function isTouriziaCancellationCompatible(offer) {
 
 async function findPrebookableOffer(data) {
 
-    console.log(
-        "🔎 RECHERCHE ÉLARGIE D'UNE OFFRE RÉSERVABLE..."
-    );
+    const MAX_SEARCH_ATTEMPTS = 3;
 
-    const searchResult =
-        await searchHotelOffers(data);
-
-    const offers =
-        searchResult.offers || [];
-
-    console.log(
-        `🏨 ${offers.length} OFFRES REÇUES DE LITEAPI`
-    );
-
-    if (!offers.length) {
-
-        throw new Error(
-            "Aucune offre hôtel disponible pour ces dates"
-        );
-
-    }
-
-    // ============================================================
-    // 1. FILTRAGE POLITIQUE TOURIZIA
-    // ============================================================
-
-    const compatibleOffers =
-        offers.filter((offer) => {
-
-            const compatible =
-                isTouriziaCancellationCompatible(
-                    offer
-                );
-
-            if (!compatible) {
-
-                console.log(
-                    "🚫 OFFRE REFUSÉE — ANNULATION:",
-                    offer.offerId
-                );
-
-            }
-
-            return compatible;
-
-        });
-
-    console.log(
-        `🟢 OFFRES COMPATIBLES: ${compatibleOffers.length}/${offers.length}`
-    );
-
-    if (!compatibleOffers.length) {
-
-        throw new Error(
-            "Aucune offre compatible avec la politique d'annulation Tourizia"
-        );
-
-    }
-
-    // ============================================================
-    // 2. CLASSEMENT DES OFFRES
-    // ============================================================
-
-    const rankedOffers =
-        [...compatibleOffers].sort(
-            (a, b) => {
-
-                // ------------------------------------------------
-                // RFN prioritaire
-                // ------------------------------------------------
-
-                const aRefundable =
-                    String(
-                        a.refundableTag || ""
-                    ).toUpperCase() === "RFN";
-
-                const bRefundable =
-                    String(
-                        b.refundableTag || ""
-                    ).toUpperCase() === "RFN";
-
-                if (
-                    aRefundable !==
-                    bRefundable
-                ) {
-
-                    return aRefundable
-                        ? -1
-                        : 1;
-
-                }
-
-                // ------------------------------------------------
-                // Prix total croissant
-                // ------------------------------------------------
-
-                const aPrice =
-                    Number(
-                        a.price?.amount ||
-                        a.price?.total ||
-                        a.amount ||
-                        Infinity
-                    );
-
-                const bPrice =
-                    Number(
-                        b.price?.amount ||
-                        b.price?.total ||
-                        b.amount ||
-                        Infinity
-                    );
-
-                return aPrice - bPrice;
-
-            }
-        );
-
-    console.log(
-        "🏆 OFFRES CLASSÉES:",
-        rankedOffers.length
-    );
-
-    // ============================================================
-    // 3. TEST DES OFFRES UNE PAR UNE
-    // ============================================================
+    let lastError = null;
 
     for (
-        const offer
-        of rankedOffers
+        let searchAttempt = 1;
+        searchAttempt <= MAX_SEARCH_ATTEMPTS;
+        searchAttempt++
     ) {
+
+        console.log(
+            "========================================"
+        );
+
+        console.log(
+            `🔄 RECHERCHE LITEAPI ${searchAttempt}/${MAX_SEARCH_ATTEMPTS}`
+        );
+
+        console.log(
+            "========================================"
+        );
 
         try {
 
-            console.log(
-                "----------------------------------------"
-            );
-
-            console.log(
-                "🏨 TEST OFFRE:",
-                offer.offerId
-            );
-
-            console.log(
-                "🏨 HOTEL:",
-                offer.hotelName ||
-                offer.hotelId
-            );
-
-            console.log(
-                "💰 PRIX:",
-                offer.price ||
-                offer.amount ||
-                "N/A"
-            );
-
-            console.log(
-                "🟢 REMBOURSABLE:",
-                offer.refundableTag
-            );
-
             // ====================================================
-            // 4. DÉTAILS HÔTEL
+            // 1️⃣ NOUVELLE RECHERCHE LITEAPI
             // ====================================================
 
-            let hotelDetails = {};
+            const searchResult =
+                await searchHotelOffers(data);
 
-            try {
+            const offers =
+                searchResult.offers || [];
 
-                hotelDetails =
-                    await getLiteApiHotelDetails(
-                        offer.hotelId
+            console.log(
+                `🏨 OFFRES REÇUES: ${offers.length}`
+            );
+
+            if (!offers.length) {
+
+                lastError =
+                    new Error(
+                        "Aucune offre hôtel disponible pour ces dates"
                     );
 
-            } catch (error) {
-
-                console.warn(
-                    "⚠️ Détails hôtel indisponibles:",
-                    error.message
-                );
-
+                continue;
             }
 
+
             // ====================================================
-            // 5. ADRESSE PRÉCISE
+            // 2️⃣ FILTRE ANNULATION
             // ====================================================
 
-            const hotelAddress =
-                formatLiteApiHotelAddress({
+            const compatibleOffers =
+                offers.filter((offer) => {
 
-                    ...hotelDetails,
+                    const compatible =
+                        isTouriziaCancellationCompatible(
+                            offer
+                        );
 
-                    address:
-                        hotelDetails.address ||
-                        offer.hotelAddress,
+                    if (!compatible) {
 
-                    zip:
-                        hotelDetails.zip ||
-                        hotelDetails.postalCode,
+                        console.log(
+                            "🚫 OFFRE REFUSÉE — ANNULATION:",
+                            offer.offerId
+                        );
 
-                    city:
-                        hotelDetails.city ||
-                        hotelDetails.city_name ||
-                        data.city,
+                    }
 
-                    country:
-                        hotelDetails.country ||
-                        hotelDetails.country_code ||
-                        data.countryCode
+                    return compatible;
 
                 });
 
-            if (!hotelAddress) {
 
-                console.warn(
-                    "⚠️ OFFRE IGNORÉE — ADRESSE PRÉCISE ABSENTE:",
-                    offer.hotelId
-                );
+            console.log(
+                `🟢 OFFRES COMPATIBLES: ${compatibleOffers.length}/${offers.length}`
+            );
+
+
+            if (!compatibleOffers.length) {
+
+                lastError =
+                    new Error(
+                        "Aucune offre compatible avec la politique d'annulation Tourizia"
+                    );
 
                 continue;
+            }
+
+
+            // ====================================================
+            // 3️⃣ MEILLEURE SÉLECTION
+            // RFN d'abord
+            // puis prix
+            // ====================================================
+
+            const rankedOffers =
+                [...compatibleOffers].sort(
+                    (a, b) => {
+
+                        const aRefundable =
+                            String(
+                                a.refundableTag || ""
+                            ).toUpperCase() === "RFN";
+
+                        const bRefundable =
+                            String(
+                                b.refundableTag || ""
+                            ).toUpperCase() === "RFN";
+
+
+                        if (
+                            aRefundable !==
+                            bRefundable
+                        ) {
+
+                            return aRefundable
+                                ? -1
+                                : 1;
+                        }
+
+
+                        const aPrice =
+                            Number(
+                                a.retailRate?.total?.[0]?.amount ??
+                                a.offerRetailRate?.amount ??
+                                a.offerInitialPrice?.amount ??
+                                Infinity
+                            );
+
+                        const bPrice =
+                            Number(
+                                b.retailRate?.total?.[0]?.amount ??
+                                b.offerRetailRate?.amount ??
+                                b.offerInitialPrice?.amount ??
+                                Infinity
+                            );
+
+
+                        return aPrice - bPrice;
+
+                    }
+                );
+
+
+            console.log(
+                `🏆 OFFRES CLASSÉES: ${rankedOffers.length}`
+            );
+
+
+            // ====================================================
+            // 4️⃣ TESTER CHAQUE OFFRE
+            // ====================================================
+
+            for (
+                const offer of rankedOffers
+            ) {
+
+                try {
+
+                    console.log(
+                        "----------------------------------------"
+                    );
+
+                    console.log(
+                        "🏨 TEST OFFRE:",
+                        offer.offerId
+                    );
+
+                    console.log(
+                        "🏨 HOTEL:",
+                        offer.hotelName ||
+                        offer.hotelId
+                    );
+
+                    console.log(
+                        "🟢 REMBOURSABLE:",
+                        offer.refundableTag
+                    );
+
+
+                    // =================================================
+                    // 5️⃣ DÉTAILS HÔTEL
+                    // =================================================
+
+                    let hotelDetails = {};
+
+                    try {
+
+                        hotelDetails =
+                            await getLiteApiHotelDetails(
+                                offer.hotelId
+                            );
+
+                    } catch (error) {
+
+                        console.warn(
+                            "⚠️ Détails hôtel indisponibles:",
+                            error.message
+                        );
+
+                    }
+
+
+                    // =================================================
+                    // 6️⃣ ADRESSE
+                    // =================================================
+
+                    const hotelAddress =
+                        formatLiteApiHotelAddress({
+
+                            ...hotelDetails,
+
+                            address:
+                                hotelDetails.address ||
+                                offer.hotelAddress,
+
+                            zip:
+                                hotelDetails.zip ||
+                                hotelDetails.postalCode,
+
+                            city:
+                                hotelDetails.city ||
+                                hotelDetails.city_name ||
+                                data.city,
+
+                            country:
+                                hotelDetails.country ||
+                                hotelDetails.country_code ||
+                                data.countryCode
+
+                        });
+
+
+                    if (!hotelAddress) {
+
+                        console.warn(
+                            "⚠️ OFFRE IGNORÉE — ADRESSE ABSENTE:",
+                            offer.hotelId
+                        );
+
+                        continue;
+                    }
+
+
+                    console.log(
+                        "📍 ADRESSE HÔTEL VALIDÉE:",
+                        hotelAddress
+                    );
+
+
+                    // =================================================
+                    // 7️⃣ OFFRE VÉRIFIÉE
+                    // =================================================
+
+                    const verifiedOffer = {
+
+                        ...offer,
+
+                        hotelName:
+                            hotelDetails.name ||
+                            offer.hotelName,
+
+                        hotelAddress,
+
+                        hotelPhone:
+                            hotelDetails.phone ||
+                            hotelDetails.phoneNumber ||
+                            hotelDetails.telephone ||
+                            "",
+
+                        hotelEmail:
+                            hotelDetails.email ||
+                            hotelDetails.contactEmail ||
+                            "",
+
+                        hotelWebsite:
+                            hotelDetails.website ||
+                            hotelDetails.webSite ||
+                            hotelDetails.url ||
+                            "",
+
+                        hotelOwner:
+                            hotelDetails.owner ||
+                            hotelDetails.ownerName ||
+                            "",
+
+                        hotelDetails
+
+                    };
+
+
+                    // =================================================
+                    // 8️⃣ PREBOOK
+                    // =================================================
+
+                    console.log(
+                        "🔐 TENTATIVE PREBOOK:",
+                        verifiedOffer.offerId
+                    );
+
+
+                    const prebook =
+                        await prebookHotelOffer(
+                            verifiedOffer.offerId
+                        );
+
+
+                    // =================================================
+                    // 9️⃣ SUCCÈS
+                    // =================================================
+
+                    console.log(
+                        "========================================"
+                    );
+
+                    console.log(
+                        "✅ OFFRE RÉSERVABLE TROUVÉE"
+                    );
+
+                    console.log(
+                        "🏨 HOTEL:",
+                        verifiedOffer.hotelName
+                    );
+
+                    console.log(
+                        "🔐 OFFER ID:",
+                        verifiedOffer.offerId
+                    );
+
+                    console.log(
+                        "========================================"
+                    );
+
+
+                    return {
+
+                        offer:
+                            verifiedOffer,
+
+                        prebook
+
+                    };
+
+
+                } catch (error) {
+
+                    lastError =
+                        error;
+
+
+                    console.warn(
+                        "⚠️ OFFRE NON RÉSERVABLE — ON PASSE À LA SUIVANTE"
+                    );
+
+                    console.warn(
+                        "⚠️ OFFER:",
+                        offer.offerId
+                    );
+
+                    console.warn(
+                        "⚠️ ERREUR:",
+                        error?.message ||
+                        JSON.stringify(error)
+                    );
+
+                }
 
             }
 
-            console.log(
-                "📍 ADRESSE HÔTEL VALIDÉE:",
-                hotelAddress
+
+            // ====================================================
+            // TOUTES LES OFFRES DE CETTE RECHERCHE ÉCHOUÉES
+            // ====================================================
+
+            console.warn(
+                `⚠️ RECHERCHE ${searchAttempt}: toutes les offres compatibles ont échoué au PREBOOK`
             );
 
-            // ====================================================
-            // 6. CONSTRUIRE L'OFFRE VÉRIFIÉE
-            // ====================================================
-
-            const verifiedOffer = {
-
-                ...offer,
-
-                hotelName:
-                    hotelDetails.name ||
-                    offer.hotelName,
-
-                hotelAddress,
-
-                hotelPhone:
-                    hotelDetails.phone ||
-                    hotelDetails.phoneNumber ||
-                    hotelDetails.telephone ||
-                    "",
-
-                hotelEmail:
-                    hotelDetails.email ||
-                    hotelDetails.contactEmail ||
-                    "",
-
-                hotelWebsite:
-                    hotelDetails.website ||
-                    hotelDetails.webSite ||
-                    hotelDetails.url ||
-                    "",
-
-                hotelOwner:
-                    hotelDetails.owner ||
-                    hotelDetails.ownerName ||
-                    "",
-
-                hotelDetails
-
-            };
-
-            // ====================================================
-            // 7. PREBOOK
-            // ====================================================
-
-            console.log(
-                "🔐 TENTATIVE PREBOOK:",
-                verifiedOffer.offerId
-            );
-
-            const prebook =
-                await prebookHotelOffer(
-                    verifiedOffer.offerId
-                );
-
-            // ====================================================
-            // 8. SUCCÈS
-            // ====================================================
-
-            console.log(
-                "✅ OFFRE RÉSERVABLE:",
-                verifiedOffer.hotelName
-            );
-
-            return {
-
-                offer:
-                    verifiedOffer,
-
-                prebook
-
-            };
 
         } catch (error) {
 
-            // ====================================================
-            // IMPORTANT :
-            // UNE OFFRE PEUT DISPARAÎTRE ENTRE
-            // SEARCH ET PREBOOK.
-            // ON ESSAIE LA SUIVANTE.
-            // ====================================================
+            lastError =
+                error;
 
-            console.warn(
-                "⚠️ OFFRE NON RÉSERVABLE — ON PASSE À LA SUIVANTE:",
-                offer.offerId
+            console.error(
+                `❌ ERREUR RECHERCHE LITEAPI ${searchAttempt}:`,
+                error
             );
 
-            console.warn(
-                "⚠️ RAISON:",
-                error.message
+        }
+
+
+        // ========================================================
+        // PETITE PAUSE AVANT UNE NOUVELLE RECHERCHE
+        // ========================================================
+
+        if (
+            searchAttempt <
+            MAX_SEARCH_ATTEMPTS
+        ) {
+
+            console.log(
+                "⏳ Nouvelle recherche LiteAPI dans 1 seconde..."
             );
 
-            continue;
+            await new Promise(
+                resolve =>
+                    setTimeout(
+                        resolve,
+                        1000
+                    )
+            );
 
         }
 
     }
 
+
     // ============================================================
-    // AUCUNE OFFRE N'A RÉUSSI
+    // AUCUNE OFFRE APRÈS 3 RECHERCHES
     // ============================================================
 
-    throw new Error(
-        "Aucune offre réservable disponible après vérification."
+    throw (
+        lastError ||
+        new Error(
+            "Aucune offre réservable disponible après plusieurs recherches."
+        )
     );
 
 }
