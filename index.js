@@ -1715,125 +1715,151 @@ async function prebookHotelOffer(offerId) {
 // - RFN + politique d'annulation → ACCEPTÉ
 // ============================================================
 
-function isTouriziaCancellationCompatible(offer) {
 
-    if (!offer) {
+function isTouriziaCancellationCompatible(offer, checkIn) {
+    if (!offer || !checkIn) {
         return false;
     }
 
-    const policies =
-        offer.cancellationPolicies;
-
-    // --------------------------------------------------------
-    // 1. Politique absente
-    // --------------------------------------------------------
+    const policies = offer.cancellationPolicies;
 
     if (!policies) {
-
         console.log(
-            "🚫 ANNULATION REFUSÉE — politique absente:",
+            "🚫 REFUS — politique d'annulation absente:",
             offer.offerId
         );
-
         return false;
     }
 
-    // --------------------------------------------------------
-    // 2. Lire le vrai refundableTag LiteAPI
-    // --------------------------------------------------------
+    const refundableTag = String(
+        policies.refundableTag || offer.refundable || ""
+    ).trim().toUpperCase();
 
-    const refundableTag =
-        String(
-            policies.refundableTag ||
-            offer.refundable ||
-            ""
-        )
-        .trim()
-        .toUpperCase();
-
-    // --------------------------------------------------------
-    // 3. NON REMBOURSABLE
-    // --------------------------------------------------------
+    const forbiddenTags = [
+        "NRFN",
+        "NRF",
+        "NONREFUNDABLE",
+        "NON_REFUNDABLE"
+    ];
 
     if (
-        refundableTag === "NRFN" ||
-        refundableTag === "NRF" ||
-        refundableTag === "NONREFUNDABLE" ||
-        refundableTag === "NON_REFUNDABLE"
+        forbiddenTags.includes(refundableTag) ||
+        offer.refundable === false
     ) {
-
         console.log(
-            "🚫 ANNULATION REFUSÉE — offre non remboursable:",
+            "🚫 REFUS — offre non remboursable:",
             offer.offerId,
             refundableTag
         );
-
         return false;
     }
 
-    // --------------------------------------------------------
-    // 4. Vérification explicite de refundable
-    // --------------------------------------------------------
-
-    if (
-        offer.refundable === false ||
-        String(offer.refundable || "")
-            .trim()
-            .toUpperCase() === "NON_REFUNDABLE"
-    ) {
-
+    if (refundableTag !== "RFN") {
         console.log(
-            "🚫 ANNULATION REFUSÉE — refundable=false:",
+            "🚫 REFUS — statut de remboursement inconnu:",
+            offer.offerId,
+            refundableTag
+        );
+        return false;
+    }
+
+    const infos = policies.cancelPolicyInfos;
+
+    if (!Array.isArray(infos) || infos.length === 0) {
+        console.log(
+            "🚫 REFUS — aucune règle d'annulation détaillée:",
             offer.offerId
         );
-
         return false;
     }
 
-    // --------------------------------------------------------
-    // 5. Une offre RFN doit avoir une vraie politique
-    // --------------------------------------------------------
+    // Date limite : arrivée moins 72 heures.
+    const arrival = new Date(`${checkIn}T00:00:00Z`);
 
-    if (refundableTag === "RFN") {
+    if (Number.isNaN(arrival.getTime())) {
+        console.log("🚫 REFUS — date d'arrivée invalide:", checkIn);
+        return false;
+    }
 
-        const infos =
-            Array.isArray(
-                policies.cancelPolicyInfos
-            )
-                ? policies.cancelPolicyInfos
-                : [];
+    const deadline = new Date(
+        arrival.getTime() - 3 * 24 * 60 * 60 * 1000
+    );
 
-        if (!infos.length) {
-
+    for (const policy of infos) {
+        if (!policy || !policy.cancelTime) {
             console.log(
-                "🚫 ANNULATION REFUSÉE — RFN sans cancelPolicyInfos:",
+                "🚫 REFUS — date limite absente:",
                 offer.offerId
             );
-
             return false;
         }
 
-        // Une politique exploitable existe
-        console.log(
-            "✅ ANNULATION ACCEPTÉE — RFN:",
-            offer.offerId
+        const timezone = String(policy.timezone || "")
+            .trim()
+            .toUpperCase();
+
+        // Refuser les fuseaux impossibles à vérifier sûrement.
+        if (
+            timezone &&
+            !["GMT", "UTC", "ETC/UTC", "Z"].includes(timezone)
+        ) {
+            console.log(
+                "🚫 REFUS — fuseau horaire à vérifier:",
+                timezone
+            );
+            return false;
+        }
+
+        const cancelTimeText = String(policy.cancelTime).trim();
+        const normalizedTime = cancelTimeText.includes("T")
+            ? cancelTimeText
+            : cancelTimeText.replace(" ", "T");
+
+        const cancelTime = new Date(
+            /Z$|[+-]\d{2}:\d{2}$/.test(normalizedTime)
+                ? normalizedTime
+                : `${normalizedTime}Z`
         );
 
-        return true;
+        const amount = Number(policy.amount);
+
+        if (
+            Number.isNaN(cancelTime.getTime()) ||
+            policy.amount === null ||
+            policy.amount === undefined ||
+            !Number.isFinite(amount) ||
+            amount < 0
+        ) {
+            console.log(
+                "🚫 REFUS — règle de pénalité incomplète:",
+                offer.offerId
+            );
+            return false;
+        }
+
+        // Une pénalité avant J-3 signifie que l'offre ne convient pas.
+        if (amount > 0 && cancelTime < deadline) {
+            console.log(
+                "🚫 REFUS — pénalité avant J-3:",
+                offer.offerId,
+                "date limite:",
+                policy.cancelTime,
+                "montant:",
+                amount,
+                policy.currency || ""
+            );
+            return false;
+        }
     }
 
-    // --------------------------------------------------------
-    // 6. Tag inconnu
-    // --------------------------------------------------------
-
     console.log(
-        "🚫 ANNULATION REFUSÉE — refundableTag inconnu:",
-        offer.offerId,
-        refundableTag || "(vide)"
+        "✅ OFFRE COMPATIBLE — politique vérifiée jusqu'à J-3:",
+        offer.offerId
     );
 
-    return false;
+    return true;
 }
+
 // ============================================================
 // 🔎 SÉLECTION D'UNE OFFRE AVEC ADRESSE VÉRIFIÉE
 // ============================================================
@@ -1897,9 +1923,10 @@ async function findPrebookableOffer(data) {
                 offers.filter((offer) => {
 
                     const compatible =
-                        isTouriziaCancellationCompatible(
-                            offer
-                        );
+    isTouriziaCancellationCompatible(
+        offer,
+        data.checkIn
+    );
 
                     if (!compatible) {
 
@@ -5093,7 +5120,7 @@ function getHotelCancellationDeadline(checkIn) {
 
     const date = new Date(checkIn);
 
-    date.setDate(date.getDate() - 2);
+   date.setDate(date.getDate() - 3);
 
     return date.toLocaleDateString(
         "fr-FR",
@@ -5256,16 +5283,21 @@ const destination =
 
     const refundable =
         data.refundable || null;
-        const cancellationPolicy = `
-Annulation gratuite jusqu'au ${cancellationDeadline}.
+        
+const cancellationPolicy = `
+Annulation gratuite jusqu'au ${cancellationDeadline},
+sous réserve des conditions d'annulation confirmées
+par l'établissement et LiteAPI.
 
-Toute annulation effectuée dans les 2 jours précédant
-la date d'arrivée entraînera la facturation de la première nuit.
+Toute annulation effectuée après cette date limite
+peut entraîner des frais conformément à la politique
+d'annulation confirmée pour la réservation.
 
 En cas de non-présentation à l'hôtel ou à l'établissement,
-le montant de la première nuit sera facturé conformément
-à la politique de l'hôtel.
+des frais peuvent être appliqués conformément à la
+politique confirmée par le fournisseur.
 `;
+
 
     const customer =
         data.guestName ||
