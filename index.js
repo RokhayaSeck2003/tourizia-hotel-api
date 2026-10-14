@@ -1266,8 +1266,7 @@ for (let i = 0; i < rooms; i++) {
     roomMapping:
         true,
 
-    maxRatesPerHotel:
-        1,
+    maxRatesPerHotel: 5,
 
     includeHotelData:
         true
