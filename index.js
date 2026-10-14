@@ -1860,6 +1860,29 @@ function isTouriziaCancellationCompatible(offer, checkIn) {
     return true;
 }
 
+function getPrebookCancellationPolicies(prebookResult) {
+    const data = prebookResult?.data || prebookResult;
+
+    // Forme principale documentée par LiteAPI.
+    if (data?.cancellationPolicies) {
+        return data.cancellationPolicies;
+    }
+
+    // Compatibilité avec les réponses imbriquées.
+    const roomTypes = data?.roomTypes || [];
+
+    for (const room of roomTypes) {
+        for (const rate of room?.rates || []) {
+            if (rate?.cancellationPolicies) {
+                return rate.cancellationPolicies;
+            }
+        }
+    }
+
+    return null;
+}
+
+
 // ============================================================
 // 🔎 SÉLECTION D'UNE OFFRE AVEC ADRESSE VÉRIFIÉE
 // ============================================================
@@ -2174,6 +2197,46 @@ async function findPrebookableOffer(data) {
                         await prebookHotelOffer(
                             verifiedOffer.offerId
                         );
+
+
+const prebookData = prebook?.data || prebook;
+
+const freshPolicies =
+    getPrebookCancellationPolicies(prebook);
+
+if (!freshPolicies) {
+    throw new Error(
+        "PREBOOK refusé : LiteAPI n'a pas fourni de politique d'annulation vérifiable."
+    );
+}
+
+if (prebookData?.cancellationChanged === true) {
+    console.warn(
+        "⚠️ LITEAPI : politique d'annulation modifiée au PREBOOK. Nouvelle vérification."
+    );
+}
+
+const prebookOffer = {
+    ...verifiedOffer,
+    cancellationPolicies: freshPolicies,
+    refundable: freshPolicies.refundableTag || null
+};
+
+if (
+    !isTouriziaCancellationCompatible(
+        prebookOffer,
+        data.checkIn
+    )
+) {
+    throw new Error(
+        "PREBOOK refusé : les conditions d'annulation actualisées ne respectent pas la politique Tourizia J-3."
+    );
+}
+
+console.log(
+    "🛡️ PREBOOK VALIDÉ — politique d'annulation vérifiée:",
+    verifiedOffer.offerId
+);
 
 
                     // =================================================
