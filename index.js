@@ -6067,28 +6067,22 @@ body {
 
     <div class="notice">
 
-        <div style="margin-bottom:6px;">
-            <strong>* IMPORTANT :</strong>
-            Présentez à l'arrivée une pièce d'identité officielle
-            avec photo et portant le même nom que le client principal.
+        <div style="margin-bottom:5px;">
+            <strong>• Arrivée :</strong>
+            Présentez une pièce d'identité officielle
+            portant le même nom que le voyageur principal.
         </div>
 
-        <div style="margin-bottom:6px;">
-            <strong>* Non-présentation :</strong>
-            Toute chambre non utilisée pourra être remise à disposition
-            de l'établissement selon sa politique d'annulation.
-        </div>
-
-        <div style="margin-bottom:6px;">
-            <strong>* Frais supplémentaires :</strong>
-            Minibar, téléphone, blanchisserie et autres consommations
-            ne sont pas inclus et seront facturés directement par l'hôtel.
+        <div style="margin-bottom:5px;">
+            <strong>• Frais supplémentaires :</strong>
+            Les consommations et services non inclus
+            peuvent être facturés directement par l'hôtel.
         </div>
 
         <div>
-            <strong>* Petit-déjeuner :</strong>
-            Un supplément peut être demandé pour les enfants.
-            Renseignez-vous auprès de l'établissement à votre arrivée.
+            <strong>• Petit-déjeuner :</strong>
+            Des conditions spécifiques peuvent s'appliquer
+            aux enfants.
         </div>
 
     </div>
@@ -6119,11 +6113,28 @@ body {
 
         </div>
 
-    </div>
+           <div class="notice">
+
+            <strong>
+                Important
+            </strong>
+
+            <div style="margin-top:5px;">
+                Ce document confirme la réservation
+                traitée par Tourizia auprès de son
+                fournisseur hôtelier.
+            </div>
+
+            <div style="margin-top:4px;">
+                Veuillez conserver ce document et
+                présenter votre référence de réservation
+                lors de votre séjour.
+            </div>
+
+        </div>
 
 
     <div class="footer">
-
         <strong>
             TOURIZIA
         </strong>
