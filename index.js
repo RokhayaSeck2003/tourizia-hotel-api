@@ -1263,6 +1263,10 @@ for (let i = 0; i < rooms; i++) {
 
     occupancies,
 
+    // Demander à LiteAPI uniquement les tarifs remboursables.
+    refundableRatesOnly: true,
+
+
     roomMapping:
         true,
 
