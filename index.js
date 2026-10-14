@@ -7200,6 +7200,150 @@ app.post("/api/ping-test", (req, res) => {
 console.log("🔥 TEST ROUTE EMAIL CHARGÉE");
 console.log("🔥 PING ROUTE CHARGÉE");
 
+
+/* ============================================================
+   TOURIZIA — DESTINATIONS GÉOGRAPHIQUES MONDIALES
+   Source : GeoNames
+   Route : GET /api/hotel-destinations?q=Massy
+   ============================================================ */
+
+const geoNamesCache = new Map();
+const GEONAMES_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 heures
+
+app.get("/api/hotel-destinations", async (req, res) => {
+    try {
+        const query = String(req.query.q || "").trim();
+        const username = process.env.GEONAMES_USERNAME;
+
+        if (query.length < 2 || query.length > 100) {
+            return res.status(400).json({
+                success: false,
+                error: "La destination doit contenir entre 2 et 100 caractères."
+            });
+        }
+
+        if (!username) {
+            console.error("GEONAMES_USERNAME manquant");
+
+            return res.status(503).json({
+                success: false,
+                error: "Le service de destinations n'est pas configuré."
+            });
+        }
+
+        // Cache pour limiter les appels GeoNames
+        const cacheKey = query.toLocaleLowerCase("fr-FR");
+        const cached = geoNamesCache.get(cacheKey);
+
+        if (cached && Date.now() - cached.timestamp < GEONAMES_CACHE_TTL) {
+            return res.json({
+                success: true,
+                source: "GeoNames",
+                destinations: cached.destinations
+            });
+        }
+
+        const url = new URL(
+            "https://secure.geonames.org/searchJSON"
+        );
+
+        url.searchParams.set("q", query);
+        url.searchParams.set("maxRows", "10");
+        url.searchParams.set("startRow", "0");
+        url.searchParams.set("featureClass", "P");
+        url.searchParams.set("orderby", "relevance");
+        url.searchParams.set("lang", "fr");
+        url.searchParams.set("username", username);
+
+        const response = await fetch(url.toString(), {
+            method: "GET",
+            headers: {
+                "Accept": "application/json"
+            },
+            signal: AbortSignal.timeout(8000)
+        });
+
+        if (!response.ok) {
+            throw new Error(
+                `GeoNames HTTP ${response.status}`
+            );
+        }
+
+        const result = await response.json();
+
+        if (result.status) {
+            console.error("GeoNames API:", result.status);
+
+            return res.status(502).json({
+                success: false,
+                error: "Le service géographique a retourné une erreur."
+            });
+        }
+
+        const records = Array.isArray(result.geonames)
+            ? result.geonames
+            : [];
+
+        const unique = new Map();
+
+        for (const place of records) {
+            if (!place.name || !place.countryCode) continue;
+
+            const destination = {
+                name: place.name,
+                country: place.countryName || "",
+                countryCode: place.countryCode.toUpperCase(),
+                region: place.adminName1 || "",
+                latitude: place.lat ? Number(place.lat) : null,
+                longitude: place.lng ? Number(place.lng) : null,
+                featureCode: place.fcode || "",
+                geonameId: place.geonameId || null
+            };
+
+            const key = [
+                destination.name.toLocaleLowerCase("fr-FR"),
+                destination.countryCode,
+                destination.region.toLocaleLowerCase("fr-FR")
+            ].join("|");
+
+            if (!unique.has(key)) {
+                unique.set(key, destination);
+            }
+        }
+
+        const destinations = Array.from(unique.values());
+
+        // Cache limité pour éviter une croissance illimitée
+        if (geoNamesCache.size >= 500) {
+            const oldestKey = geoNamesCache.keys().next().value;
+            if (oldestKey) geoNamesCache.delete(oldestKey);
+        }
+
+        geoNamesCache.set(cacheKey, {
+            timestamp: Date.now(),
+            destinations
+        });
+
+        return res.json({
+            success: true,
+            source: "GeoNames",
+            destinations
+        });
+
+    } catch (error) {
+        console.error(
+            "❌ HOTEL DESTINATIONS ERROR:",
+            error.message
+        );
+
+        return res.status(502).json({
+            success: false,
+            error: "Impossible de rechercher les destinations pour le moment."
+        });
+    }
+});
+
+
 // ============================================================
 // 🏨 AUTOCOMPLETE HÔTELS TOURIZIA
 // Recherche par ville + code pays avec LiteAPI
