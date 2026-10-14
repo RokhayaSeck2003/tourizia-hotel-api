@@ -5328,11 +5328,14 @@ body {
 }
 
 .page {
+
     width: 210mm;
     height: 297mm;
     margin: 0;
     padding: 10mm 12mm;
-    overflow: hidden;
+
+    overflow: visible;
+
     background: #ffffff;
 }
 
@@ -6067,86 +6070,56 @@ body {
 
     <div class="notice">
 
-        <div style="margin-bottom:5px;">
+        <div style="margin-bottom:4px;">
             <strong>• Arrivée :</strong>
-            Présentez une pièce d'identité officielle
-            portant le même nom que le voyageur principal.
+            Pièce d'identité officielle obligatoire.
         </div>
 
-        <div style="margin-bottom:5px;">
+        <div style="margin-bottom:4px;">
             <strong>• Frais supplémentaires :</strong>
-            Les consommations et services non inclus
-            peuvent être facturés directement par l'hôtel.
+            Les services non inclus peuvent être facturés par l'hôtel.
         </div>
 
         <div>
             <strong>• Petit-déjeuner :</strong>
-            Des conditions spécifiques peuvent s'appliquer
-            aux enfants.
+            Des conditions spécifiques peuvent s'appliquer aux enfants.
         </div>
 
     </div>
 
 </div>
 
-        <div class="notice">
 
-            <strong>
-                Important
-            </strong>
+<div class="notice">
 
-            <div style="margin-top:5px;">
+    <strong>
+        Important
+    </strong>
 
-                Ce document confirme la réservation
-                traitée par Tourizia auprès de son
-                fournisseur hôtelier.
-
-            </div>
-
-            <div style="margin-top:4px;">
-
-                Veuillez conserver ce document et
-                présenter votre référence de réservation
-                lors de votre séjour.
-
-            </div>
-
-        </div>
-
-           <div class="notice">
-
-            <strong>
-                Important
-            </strong>
-
-            <div style="margin-top:5px;">
-                Ce document confirme la réservation
-                traitée par Tourizia auprès de son
-                fournisseur hôtelier.
-            </div>
-
-            <div style="margin-top:4px;">
-                Veuillez conserver ce document et
-                présenter votre référence de réservation
-                lors de votre séjour.
-            </div>
-
-        </div>
-
-
-    <div class="footer">
-        <strong>
-            TOURIZIA
-        </strong>
-
-        — Votre réservation hôtel est confirmée.
-
-        <br>
-
-        Pour toute question concernant votre
-        réservation, contactez le support Tourizia.
-
+    <div style="margin-top:4px;">
+        Cette confirmation atteste de la réservation
+        traitée par Tourizia auprès de son fournisseur hôtelier.
     </div>
+
+    <div style="margin-top:3px;">
+        Conservez cette référence pour votre séjour.
+    </div>
+
+</div>
+
+
+<div class="footer">
+
+    <strong>TOURIZIA</strong>
+
+    — Votre réservation hôtel est confirmée.
+
+    <br>
+
+    Pour toute question concernant votre réservation,
+    contactez le support Tourizia.
+
+</div>
 
 </div>
 
