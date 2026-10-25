@@ -36,7 +36,7 @@ const MONGODB_DB =
 let mongoClient = null;
 let mongoDb = null;
 let hotelTransactions = null;
-
+let stripeWebhookEvents = null;
 
 // ============================================================
 // CONNEXION MONGODB
@@ -71,6 +71,18 @@ async function connectMongoDB() {
             mongoDb.collection(
                 "hotel_transactions"
             );
+
+stripeWebhookEvents = mongoDb.collection(
+  "stripeWebhookEvents"
+);
+
+await stripeWebhookEvents.createIndex(
+  { eventId: 1 },
+  { unique: true }
+);
+
+console.log("✅ Index anti-doublon Stripe hôtel prêt");
+
 
         await hotelTransactions.createIndex(
             {
@@ -664,31 +676,6 @@ const transactionId =
         // ANTI-DOUBLE TRAITEMENT
         // ----------------------------------------------------
 
-        globalThis.hotelStripeProcessed =
-            globalThis.hotelStripeProcessed ||
-            new Set();
-
-        if (
-            globalThis.hotelStripeProcessed.has(
-                paymentId
-            )
-        ) {
-
-            console.log(
-                "⚠️ HOTEL STRIPE DÉJÀ TRAITÉ:",
-                paymentId
-            );
-
-            return res.json({
-                received: true,
-                alreadyProcessed: true
-            });
-
-        }
-
-        globalThis.hotelStripeProcessed.add(
-            paymentId
-        );
 
         // ----------------------------------------------------
         // DONNÉES RÉSERVATION
@@ -1188,7 +1175,11 @@ function formatLiteApiHotelAddress(hotel = {}) {
 // RECHERCHE DES OFFRES LITEAPI
 // ============================================================
 
-async function searchHotelOffers(data) {
+async function searchHotelOffers(
+    data,
+    refundableOnly = true,
+    allowFallback = true
+) {
 
     const validation =
         validateHotelRequest(data);
@@ -1264,7 +1255,7 @@ for (let i = 0; i < rooms; i++) {
     occupancies,
 
     // Demander à LiteAPI uniquement les tarifs remboursables.
-    refundableRatesOnly: true,
+   refundableRatesOnly: refundableOnly,
 
 
     roomMapping:
@@ -1509,6 +1500,15 @@ raw:
         "🏨 OFFRES TROUVÉES:",
         offers.length
     );
+    // Si aucune offre remboursable n'est trouvée,
+// effectuer une seconde recherche plus large.
+if (offers.length === 0 && refundableOnly && allowFallback) {
+    console.log(
+        "⚠️ Aucune offre remboursable. Recherche de tarifs alternatifs..."
+    );
+
+    return await searchHotelOffers(data, false, false);
+}
 
     return {
 
