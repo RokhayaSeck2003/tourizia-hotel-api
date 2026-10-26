@@ -2271,13 +2271,13 @@ console.log(
 
 
                     return {
-
-                        offer:
-                            verifiedOffer,
-
-                        prebook
-
-                    };
+    offer: {
+        ...prebookOffer,
+        cancellationPolicies: freshPolicies,
+        refundable: freshPolicies.refundableTag || null
+    },
+    prebook
+};
 
 
                 } catch (error) {
@@ -4822,6 +4822,13 @@ console.log(
 
         paymentMethod:
             data.paymentMethod,
+
+             // 📅 POLITIQUE D'ANNULATION LITEAPI
+    cancellationPolicies:
+        cancellationPolicies || null,
+
+    refundable:
+        refundableTag || null,
             
             // 📧 Coordonnées client
     email: data.email,
@@ -5264,6 +5271,110 @@ function getHotelCountryName(countryCode) {
         countryCode
     );
 }
+// ============================================================
+// FORMAT DATE ANNULATION
+// ============================================================
+
+function formatCancellationDate(value) {
+    if (!value) return null;
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+
+    return new Intl.DateTimeFormat("fr-FR", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC"
+    }).format(date);
+}
+
+function buildCancellationPolicyText(data = {}) {
+    const policies = data.cancellationPolicies;
+
+    if (!policies || typeof policies !== "object") {
+        return [
+            "Conditions d'annulation",
+            "Consultez les conditions confirmées par le fournisseur.",
+            "Aucune date limite d'annulation n'est disponible dans les données transmises."
+        ].join("\n");
+    }
+
+    const tag = String(
+        policies.refundableTag || data.refundable || ""
+    ).trim().toUpperCase();
+
+    const infos = Array.isArray(policies.cancelPolicyInfos)
+        ? policies.cancelPolicyInfos
+        : [];
+
+    if (["NRFN", "NRF", "NONREFUNDABLE", "NON_REFUNDABLE"].includes(tag)) {
+        return [
+            "Tarif non remboursable",
+            "Les conditions de remboursement dépendent du tarif confirmé.",
+            "Vérifiez les conditions du fournisseur avant toute demande d'annulation."
+        ].join("\n");
+    }
+
+    if (infos.length === 0) {
+        return [
+            "Conditions d'annulation",
+            "Le fournisseur n'a pas transmis de détail exploitable sur les délais et pénalités.",
+            "Les conditions exactes doivent être vérifiées auprès du fournisseur."
+        ].join("\n");
+    }
+
+    const lines = [
+        tag === "RFN"
+            ? "Tarif indiqué comme remboursable par le fournisseur"
+            : "Politique d'annulation du fournisseur"
+    ];
+
+    for (const policy of infos) {
+        const deadline = formatCancellationDate(policy.cancelTime);
+        const amount = Number(policy.amount);
+        const currency = String(policy.currency || "").trim();
+
+        if (deadline) {
+            lines.push(`Date d'application de la règle : ${deadline}`);
+        } else {
+            lines.push("Date limite : non disponible");
+        }
+
+        if (
+            policy.amount !== null &&
+            policy.amount !== undefined &&
+            Number.isFinite(amount) &&
+            amount >= 0
+        ) {
+            if (amount === 0) {
+                lines.push("Pénalité indiquée : 0 (sans frais selon cette règle)");
+            } else {
+                lines.push(
+                    `Pénalité indiquée : ${amount.toFixed(2)} ${currency}`.trim()
+                );
+            }
+        } else {
+            lines.push("Montant de la pénalité : non précisé");
+        }
+
+        if (policy.cancelType) {
+            lines.push(`Type de pénalité : ${String(policy.cancelType)}`);
+        }
+
+        lines.push("");
+    }
+
+    lines.push(
+        "Les règles ci-dessus correspondent aux données reçues du fournisseur. " +
+        "Les conditions finales de la réservation confirmée prévalent."
+    );
+
+    return lines.join("\n");
+}
 
 // ============================================================
 // CONSTRUIRE HTML DU DOCUMENT HÔTEL
@@ -5343,27 +5454,12 @@ const destination =
 
     const rooms =
         Number(data.rooms || 1);
-        const cancellationDeadline =
-    getHotelCancellationDeadline(
-        data.checkIn
-    );
+       
+const refundable = data.refundable || null;
 
-    const refundable =
-        data.refundable || null;
-        
-const cancellationPolicy = `
-Annulation gratuite jusqu'au ${cancellationDeadline},
-sous réserve des conditions d'annulation confirmées
-par l'établissement et LiteAPI.
+const cancellationPolicy =
+    buildCancellationPolicyText(data);
 
-Toute annulation effectuée après cette date limite
-peut entraîner des frais conformément à la politique
-d'annulation confirmée pour la réservation.
-
-En cas de non-présentation à l'hôtel ou à l'établissement,
-des frais peuvent être appliqués conformément à la
-politique confirmée par le fournisseur.
-`;
 
 
     const customer =
@@ -5724,10 +5820,6 @@ body {
 <div class="page">
 
     <div class="header">
-
-        <div class="logo">
-            TOURIZIA
-        </div>
 
         <div class="header-subtitle">
             Confirmation de réservation hôtel
