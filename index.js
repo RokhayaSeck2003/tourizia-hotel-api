@@ -4809,6 +4809,9 @@ await updateHotelTransactionStatus(
 console.log(
     `🎉 TRANSACTION ${data.transactionId} → CONFIRMED`
 );
+
+
+
     // ========================================================
     // RÉSULTAT FINAL
     // ========================================================
@@ -5030,12 +5033,90 @@ try {
 
 }
 
+    // ========================================================
+    // 📊 ENVOI GOOGLE SHEETS — RÉSERVATION HÔTEL CONFIRMÉE
+    // ========================================================
+
+    const totalPersons =
+        Number(finalBooking.adults || 0) +
+        Number(finalBooking.children || 0);
+
+    await sendToTouriziaDashboard({
+
+        date: new Date().toISOString(),
+
+        service: "hotel",
+
+        status: "confirmed",
+
+        reference:
+            finalBooking.confirmationNumber,
+
+        payment_id:
+            finalBooking.paymentId,
+
+        client_name:
+            finalBooking.fullName,
+
+        email:
+            finalBooking.email,
+
+        phone:
+            finalBooking.phone,
+
+        destination:
+            finalBooking.city,
+
+        hotel_name:
+            finalBooking.hotelName,
+
+        room_name:
+            finalBooking.roomName,
+
+        flight_route: "",
+
+        check_in:
+            finalBooking.checkIn,
+
+        check_out:
+            finalBooking.checkOut,
+
+        passengers: totalPersons,
+
+        adults:
+            finalBooking.adults,
+
+        children:
+            finalBooking.children,
+
+        amount: 15,
+
+        currency: "USD",
+
+        payment_method:
+            finalBooking.paymentMethod,
+
+        provider: "LiteAPI",
+
+        booking_id:
+            finalBooking.bookingId,
+
+        confirmation_number:
+            finalBooking.confirmationNumber,
+
+        pdf_url:
+            finalBooking.pdfUrl || ""
+
+    });
+
+
 // ========================================================
 // RETOUR FINAL
 // ========================================================
 
 return finalBooking;
 }
+
 // ========================================================
 
 // ============================================================
@@ -7685,6 +7766,61 @@ app.get("/api/hotel-autocomplete", async (req, res) => {
         });
     }
 });
+
+
+// ============================================================
+// FIN DU ROUTEUR HÔTEL GOOGLE SHEETS
+// ============================================================
+async function sendToTouriziaDashboard(data) {
+
+    const url =
+        process.env.TOURIZIA_SHEETS_WEBHOOK_URL;
+
+    if (!url) {
+
+        console.warn(
+            "⚠️ TOURIZIA_SHEETS_WEBHOOK_URL manquante"
+        );
+
+        return;
+
+    }
+
+    try {
+
+        const response =
+            await fetch(url, {
+
+                method: "POST",
+
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+
+                body:
+                    JSON.stringify(data)
+
+            });
+
+        const result =
+            await response.json();
+
+        console.log(
+            "📊 DASHBOARD HOTEL:",
+            result
+        );
+
+    } catch (error) {
+
+        console.error(
+            "❌ DASHBOARD HOTEL ERROR:",
+            error.message
+        );
+
+    }
+
+}
 
 // ============================================================
 // SERVER
