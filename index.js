@@ -7873,56 +7873,68 @@ app.get("/api/hotel-autocomplete", async (req, res) => {
 // ============================================================
 // FIN DU ROUTEUR HÔTEL GOOGLE SHEETS
 // ============================================================
-async function sendToTouriziaDashboard(data) {
 
-    const url =
-        process.env.TOURIZIA_SHEETS_WEBHOOK_URL;
+async function sendToTouriziaDashboard(data) {
+    const url = process.env.TOURIZIA_SHEETS_WEBHOOK_URL;
 
     if (!url) {
-
         console.warn(
-            "⚠️ TOURIZIA_SHEETS_WEBHOOK_URL manquante"
+            "⚠️ TOURIZIA_SHEETS_WEBHOOK_URL manquante — envoi Sheets ignoré"
         );
-
-        return;
-
+        return { success: false, skipped: true };
     }
 
     try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "text/plain;charset=utf-8"
+            },
+            body: JSON.stringify(data),
+            redirect: "follow"
+        });
 
-        const response =
-            await fetch(url, {
+        const raw = await response.text();
 
-                method: "POST",
+        console.log("📊 SHEETS HTTP STATUS:", response.status);
+        console.log("📊 SHEETS FINAL URL:", response.url);
+        console.log("📊 SHEETS RESPONSE:", raw.slice(0, 500));
 
-                headers: {
-                    "Content-Type":
-                        "application/json"
-                },
+        let result;
 
-                body:
-                    JSON.stringify(data)
+        try {
+            result = JSON.parse(raw);
+        } catch {
+            throw new Error(
+                "Google Sheets a renvoyé du HTML au lieu du JSON"
+            );
+        }
 
-            });
+        if (!response.ok || result.success !== true) {
+            throw new Error(
+                "Échec Google Sheets : " + raw.slice(0, 500)
+            );
+        }
 
-        const result =
-            await response.json();
+        console.log("✅ DASHBOARD TOURIZIA:", result);
 
-        console.log(
-            "📊 DASHBOARD HOTEL:",
-            result
-        );
+        return result;
 
     } catch (error) {
-
         console.error(
-            "❌ DASHBOARD HOTEL ERROR:",
+            "❌ DASHBOARD GOOGLE SHEETS ERROR:",
             error.message
         );
 
+        // L'échec du tableau de bord ne doit pas interrompre
+        // une réservation déjà confirmée par le fournisseur.
+        return {
+            success: false,
+            error: error.message
+        };
     }
-
 }
+
 
 // ============================================================
 // SERVER
