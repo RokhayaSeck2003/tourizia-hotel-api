@@ -4109,40 +4109,64 @@ for (
 //
 
 
+
 function formatHotelFailureReason(reason) {
     if (typeof reason === "string") {
         return reason.trim() ||
-            "Aucun détail d'erreur fourni par le système.";
+            "Aucun détail d'erreur fourni par LiteAPI.";
     }
 
     if (reason instanceof Error) {
         return reason.message ||
-            "Erreur technique sans message détaillé.";
+            "Erreur technique lors de la réservation.";
     }
 
     if (reason && typeof reason === "object") {
-        const details = [
-            reason.message,
-            reason.error,
-            reason.description,
-            reason.details
-        ]
-            .filter(value => typeof value === "string" && value.trim())
-            .map(value => value.trim());
+        const parts = [];
 
-        if (details.length) {
-            return [...new Set(details)].join(" — ");
+        function collect(value, label = "") {
+            if (typeof value === "string" && value.trim()) {
+                parts.push(
+                    label
+                        ? `${label}: ${value.trim()}`
+                        : value.trim()
+                );
+            } else if (typeof value === "number") {
+                parts.push(label ? `${label}: ${value}` : String(value));
+            } else if (Array.isArray(value)) {
+                value.forEach(item => collect(item, label));
+            } else if (value && typeof value === "object") {
+                for (const [key, item] of Object.entries(value)) {
+                    if ([
+                        "message",
+                        "error",
+                        "description",
+                        "details",
+                        "code",
+                        "status"
+                    ].includes(key)) {
+                        collect(item, key);
+                    }
+                }
+            }
+        }
+
+        collect(reason);
+
+        if (parts.length) {
+            return [...new Set(parts)].join(" — ");
         }
 
         try {
-            return JSON.stringify(reason, null, 2);
+            return JSON.stringify(reason);
         } catch {
-            return "Erreur reçue sous un format non reconnu.";
+            return "Erreur LiteAPI : détail impossible à lire.";
         }
     }
 
-    return "Aucun détail d'erreur fourni par le système.";
+    return "Aucun détail d'erreur fourni par LiteAPI.";
 }
+
 
 // ============================================================
 // 📧 PAIEMENT REÇU — RECHERCHE MANUELLE ADMIN
