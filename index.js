@@ -706,9 +706,15 @@ const pendingPayment =
         metadata.email ||
         session.customer_email,
 
+
     fullName:
         metadata.fullName ||
         "",
+
+        phone:
+    pendingPayment?.data?.phone ||
+    metadata.phone ||
+    "",
 
     city:
         metadata.city,
@@ -2964,6 +2970,9 @@ cancel_url:
             email:
               data.email || "",
 
+              // 📞 Téléphone international du client
+    phone: String(data.phone || "").trim(),
+
             city:
               data.city,
 
@@ -4080,6 +4089,43 @@ for (
 // 5. BOOK
 // 6. Retourner confirmation
 //
+
+
+function formatHotelFailureReason(reason) {
+    if (typeof reason === "string") {
+        return reason.trim() ||
+            "Aucun détail d'erreur fourni par le système.";
+    }
+
+    if (reason instanceof Error) {
+        return reason.message ||
+            "Erreur technique sans message détaillé.";
+    }
+
+    if (reason && typeof reason === "object") {
+        const details = [
+            reason.message,
+            reason.error,
+            reason.description,
+            reason.details
+        ]
+            .filter(value => typeof value === "string" && value.trim())
+            .map(value => value.trim());
+
+        if (details.length) {
+            return [...new Set(details)].join(" — ");
+        }
+
+        try {
+            return JSON.stringify(reason, null, 2);
+        } catch {
+            return "Erreur reçue sous un format non reconnu.";
+        }
+    }
+
+    return "Aucun détail d'erreur fourni par le système.";
+}
+
 // ============================================================
 // 📧 PAIEMENT REÇU — RECHERCHE MANUELLE ADMIN
 // ============================================================
@@ -4089,6 +4135,7 @@ async function sendHotelManualSearchNotification(
     reason
 ) {
 
+    const readableReason = formatHotelFailureReason(reason);
     const adminEmail =
         "contact@tourizia.com";
 
@@ -4351,30 +4398,22 @@ async function sendHotelManualSearchNotification(
                 >
 
                     <h3>
-                        🔎 Motif de l'intervention
+                        🔎 Pourquoi la réservation automatique a échoué
                     </h3>
 
                     <p>
-                        ${escapeHtml(
-                            reason ||
-                            "Aucune offre LiteAPI disponible."
-                        )}
+                        ${escapeHtml(readableReason).replace(/\n/g, "<br>")}
                     </p>
 
                 </div>
 
 
-                <p
-                    style="
-                        margin-top:25px;
-                        color:#6c7882;
-                    "
-                >
-                    Action requise :
-                    effectuer une recherche manuelle
-                    pour cette demande et contacter le client
-                    si nécessaire.
-                </p>
+                <p style="margin-top:25px;color:#6c7882;">
+    <strong>Action requise :</strong>
+    vérifier le motif technique ci-dessus, rechercher une offre
+    correspondant aux dates, à la ville et au nombre de voyageurs,
+    puis mettre à jour le dossier et contacter le client si nécessaire.
+</p>
 
             </div>
 
