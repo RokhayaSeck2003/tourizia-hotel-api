@@ -1955,16 +1955,35 @@ async function findPrebookableOffer(data) {
                 `🏨 OFFRES REÇUES: ${offers.length}`
             );
 
-            if (!offers.length) {
+           if (!offers.length) {
+    const raw = searchResult.raw || {};
 
-                lastError =
-                    new Error(
-                        "Aucune offre hôtel disponible pour ces dates"
-                    );
+    console.error("❌ LITEAPI : AUCUNE OFFRE EXTRAITE", {
+        city: data.city,
+        countryCode: data.countryCode,
+        checkIn: data.checkIn,
+        checkOut: data.checkOut,
+        adults: data.adults,
+        rooms: data.rooms,
+        refundableRatesOnly: true,
+        responseCode: raw.code ?? null,
+        responseMessage: raw.message ?? null,
+        dataType: Array.isArray(raw.data)
+            ? "array"
+            : typeof raw.data,
+        dataCount: Array.isArray(raw.data)
+            ? raw.data.length
+            : null
+    });
 
-                continue;
-            }
+    lastError = new Error(
+        raw.message ||
+        raw.error?.message ||
+        "LiteAPI n'a retourné aucune offre exploitable pour cette recherche."
+    );
 
+    continue;
+}
 
             // ====================================================
             // 2️⃣ FILTRE ANNULATION
