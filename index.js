@@ -38,6 +38,24 @@ let mongoDb = null;
 let hotelTransactions = null;
 let stripeWebhookEvents = null;
 
+function formatHotelError(error) {
+  if (typeof error === "string") return error;
+
+  if (error instanceof Error) return error.message;
+
+  if (error && typeof error === "object") {
+    return (
+      error.description ||
+      error.message ||
+      error.error?.description ||
+      error.error?.message ||
+      JSON.stringify(error)
+    );
+  }
+
+  return String(error ?? "Erreur inconnue");
+}
+
 // ============================================================
 // CONNEXION MONGODB
 // ============================================================
