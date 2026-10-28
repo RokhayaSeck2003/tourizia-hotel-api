@@ -7472,8 +7472,6 @@ app.post("/api/ping-test", (req, res) => {
 console.log("🔥 TEST ROUTE EMAIL CHARGÉE");
 console.log("🔥 PING ROUTE CHARGÉE");
 
-
-/
 /* ============================================================
    TOURIZIA — DESTINATIONS GÉOGRAPHIQUES MONDIALES
    Source : GeoNames
