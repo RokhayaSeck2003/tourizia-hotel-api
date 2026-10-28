@@ -7473,6 +7473,7 @@ console.log("🔥 TEST ROUTE EMAIL CHARGÉE");
 console.log("🔥 PING ROUTE CHARGÉE");
 
 
+/
 /* ============================================================
    TOURIZIA — DESTINATIONS GÉOGRAPHIQUES MONDIALES
    Source : GeoNames
@@ -7480,7 +7481,16 @@ console.log("🔥 PING ROUTE CHARGÉE");
    ============================================================ */
 
 const geoNamesCache = new Map();
-const GEONAMES_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 heures
+const GEONAMES_CACHE_TTL = 6 * 60 * 60 * 1000;
+
+function normalizeDestinationText(value = "") {
+    return String(value)
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLocaleLowerCase("fr-FR")
+        .trim()
+        .replace(/\s+/g, " ");
+}
 
 app.get("/api/hotel-destinations", async (req, res) => {
     try {
@@ -7503,11 +7513,13 @@ app.get("/api/hotel-destinations", async (req, res) => {
             });
         }
 
-        // Cache pour limiter les appels GeoNames
-        const cacheKey = query.toLocaleLowerCase("fr-FR");
+        const cacheKey = normalizeDestinationText(query);
         const cached = geoNamesCache.get(cacheKey);
 
-        if (cached && Date.now() - cached.timestamp < GEONAMES_CACHE_TTL) {
+        if (
+            cached &&
+            Date.now() - cached.timestamp < GEONAMES_CACHE_TTL
+        ) {
             return res.json({
                 success: true,
                 source: "GeoNames",
@@ -7520,7 +7532,7 @@ app.get("/api/hotel-destinations", async (req, res) => {
         );
 
         url.searchParams.set("q", query);
-        url.searchParams.set("maxRows", "10");
+        url.searchParams.set("maxRows", "30");
         url.searchParams.set("startRow", "0");
         url.searchParams.set("featureClass", "P");
         url.searchParams.set("orderby", "relevance");
@@ -7530,15 +7542,13 @@ app.get("/api/hotel-destinations", async (req, res) => {
         const response = await fetch(url.toString(), {
             method: "GET",
             headers: {
-                "Accept": "application/json"
+                Accept: "application/json"
             },
             signal: AbortSignal.timeout(8000)
         });
 
         if (!response.ok) {
-            throw new Error(
-                `GeoNames HTTP ${response.status}`
-            );
+            throw new Error(`GeoNames HTTP ${response.status}`);
         }
 
         const result = await response.json();
@@ -7556,26 +7566,47 @@ app.get("/api/hotel-destinations", async (req, res) => {
             ? result.geonames
             : [];
 
+        const normalizedQuery = normalizeDestinationText(query);
         const unique = new Map();
 
         for (const place of records) {
-            if (!place.name || !place.countryCode) continue;
+            if (
+                !place.name ||
+                !place.countryCode ||
+                !Number.isFinite(Number(place.lat)) ||
+                !Number.isFinite(Number(place.lng))
+            ) {
+                continue;
+            }
 
             const destination = {
-                name: place.name,
-                country: place.countryName || "",
-                countryCode: place.countryCode.toUpperCase(),
-                region: place.adminName1 || "",
-                latitude: place.lat ? Number(place.lat) : null,
-                longitude: place.lng ? Number(place.lng) : null,
-                featureCode: place.fcode || "",
+                name: String(place.name).trim(),
+                country: String(place.countryName || "").trim(),
+                countryCode: String(place.countryCode).toUpperCase(),
+                region: String(place.adminName1 || "").trim(),
+                latitude: Number(place.lat),
+                longitude: Number(place.lng),
+                featureCode: String(place.fcode || ""),
                 geonameId: place.geonameId || null
             };
 
+            const normalizedName = normalizeDestinationText(
+                destination.name
+            );
+
+            // Ne conserver que les résultats liés à la saisie.
+            // Cela évite, par exemple, Kingston lors d'une recherche Paris.
+            if (
+                !normalizedName.includes(normalizedQuery) &&
+                !normalizedQuery.includes(normalizedName)
+            ) {
+                continue;
+            }
+
             const key = [
-                destination.name.toLocaleLowerCase("fr-FR"),
+                normalizedName,
                 destination.countryCode,
-                destination.region.toLocaleLowerCase("fr-FR")
+                normalizeDestinationText(destination.region)
             ].join("|");
 
             if (!unique.has(key)) {
@@ -7585,21 +7616,54 @@ app.get("/api/hotel-destinations", async (req, res) => {
 
         const destinations = Array.from(unique.values());
 
-        // Cache limité pour éviter une croissance illimitée
+        // Priorité : nom exact, ville principale, puis correspondances proches.
+        destinations.sort((a, b) => {
+            const nameA = normalizeDestinationText(a.name);
+            const nameB = normalizeDestinationText(b.name);
+
+            const exactA = nameA === normalizedQuery ? 0 : 1;
+            const exactB = nameB === normalizedQuery ? 0 : 1;
+
+            if (exactA !== exactB) {
+                return exactA - exactB;
+            }
+
+            const capitalA = a.featureCode === "PPLC" ? 0 : 1;
+            const capitalB = b.featureCode === "PPLC" ? 0 : 1;
+
+            if (capitalA !== capitalB) {
+                return capitalA - capitalB;
+            }
+
+            const startsA = nameA.startsWith(normalizedQuery) ? 0 : 1;
+            const startsB = nameB.startsWith(normalizedQuery) ? 0 : 1;
+
+            if (startsA !== startsB) {
+                return startsA - startsB;
+            }
+
+            return nameA.localeCompare(nameB, "fr");
+        });
+
+        // Limiter le nombre de suggestions affichées.
+        const finalDestinations = destinations.slice(0, 10);
+
         if (geoNamesCache.size >= 500) {
             const oldestKey = geoNamesCache.keys().next().value;
-            if (oldestKey) geoNamesCache.delete(oldestKey);
+            if (oldestKey) {
+                geoNamesCache.delete(oldestKey);
+            }
         }
 
         geoNamesCache.set(cacheKey, {
             timestamp: Date.now(),
-            destinations
+            destinations: finalDestinations
         });
 
         return res.json({
             success: true,
             source: "GeoNames",
-            destinations
+            destinations: finalDestinations
         });
 
     } catch (error) {
@@ -7614,6 +7678,7 @@ app.get("/api/hotel-destinations", async (req, res) => {
         });
     }
 });
+
 
 
 // ============================================================
