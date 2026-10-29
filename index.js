@@ -1411,112 +1411,113 @@ const hotelMetadataById = new Map(
      * ou demander cet ID au client.
      */
 
-    for (
-        const hotel of hotels
-    ) {
+    
+for (const hotel of hotels) {
+    const roomTypes = hotel.roomTypes || [];
 
-        const roomTypes =
-            hotel.roomTypes || [];
+    const hotelId = hotel.hotelId || hotel.id;
 
-        for (
-            const room of roomTypes
-        ) {
+    const hotelMetadata =
+        hotelMetadataById.get(String(hotelId)) || {};
 
-            if (!room.offerId) {
-                continue;
-            }
+    const hotelData = {
+        ...hotelMetadata,
+        ...(hotel.hotelData || {})
+    };
 
-           const hotelId =
-    hotel.hotelId ||
-    hotel.id;
+    for (const room of roomTypes) {
+        const rates = Array.isArray(room.rates)
+            ? room.rates
+            : [];
 
-const hotelMetadata =
-    hotelMetadataById.get(String(hotelId)) || {};
+        for (const rate of rates) {
+            // L'offre doit avoir un véritable offerId.
+            const offerId = rate.offerId || room.offerId;
 
-const hotelData = {
-    ...hotelMetadata,
-    ...(hotel.hotelData || {})
-};
+            if (!offerId) continue;
+
+            const retailRate = rate.retailRate || {};
+
+            const price =
+                retailRate.total?.[0]?.amount ??
+                room.offerRetailRate?.amount ??
+                room.offerInitialPrice?.amount ??
+                null;
+
+            const currency =
+                retailRate.total?.[0]?.currency ??
+                room.offerRetailRate?.currency ??
+                room.offerInitialPrice?.currency ??
+                "EUR";
+
+            const cancellationPolicies =
+                rate.cancellationPolicies ||
+                rate.cancelationPolicies ||
+                room.cancellationPolicies ||
+                room.cancelationPolicies ||
+                null;
+
+            const refundable =
+                cancellationPolicies?.refundableTag ??
+                cancellationPolicies?.refundable ??
+                null;
 
             offers.push({
+                hotelId,
 
-    hotelId:
-    hotelId,
+                hotelName:
+                    hotelData.name ||
+                    hotel.name ||
+                    "",
 
-hotelName:
-    hotelData.name ||
-    hotel.name ||
-    "",
+                hotelAddress:
+                    hotelData.address ||
+                    hotelData.addressLine ||
+                    hotelData.address1 ||
+                    hotelData.street ||
+                    hotelData.location?.address ||
+                    hotelData.hotelAddress ||
+                    "",
 
-hotelAddress:
-    hotelData.address ||
-    hotelData.addressLine ||
-    hotelData.address1 ||
-    hotelData.street ||
-    hotelData.location?.address ||
-    hotelData.hotelAddress ||
-    "",
+                hotelOwner:
+                    hotelData.owner?.name ||
+                    hotelData.owner?.fullName ||
+                    hotelData.ownerName ||
+                    hotelData.propertyOwner ||
+                    "",
 
-    // 👤 PROPRIÉTAIRE SI LITEAPI LE FOURNIT
-    hotelOwner:
-        typeof (
-            hotelData.owner ||
-            hotelData.propertyOwner ||
-            hotelData.ownerName ||
-            hotelData.proprietor ||
-            ""
-        ) === "object"
-            ? (
-                hotelData.owner?.name ||
-                hotelData.owner?.fullName ||
-                hotelData.owner?.companyName ||
-                ""
-            )
-            : (
-                hotelData.owner ||
-                hotelData.propertyOwner ||
-                hotelData.ownerName ||
-                hotelData.proprietor ||
-                ""
-            ),
+                offerId,
 
-    offerId:
-        room.offerId,
+                roomName:
+                    rate.name ||
+                    room.name ||
+                    room.roomName ||
+                    "Chambre",
 
-    roomName:
-        room.name ||
-        room.roomName ||
-        "Chambre",
+                price,
+                currency,
+                refundable,
+                refundableTag: refundable,
 
-    price:
-        room.retailRate?.total ||
-        room.price ||
-        room.rate?.total ||
-        null,
+                cancellationPolicies,
 
-    currency:
-        room.retailRate?.currency ||
-        "EUR",
+                retailRate,
 
-    refundable:
-    room.cancellationPolicies?.refundableTag ||
-    room.refundableTag ||
-    room.rateTags ||
-    null,
+                offerRetailRate:
+                    room.offerRetailRate || null,
 
-cancellationPolicies:
-    room.cancellationPolicies ||
-    room.rates?.[0]?.cancellationPolicies ||
-    null,
+                offerInitialPrice:
+                    room.offerInitialPrice || null,
 
-raw:
-    room
-
-});
-
+                raw: {
+                    ...room,
+                    selectedRate: rate
+                }
+            });
         }
-
     }
+}
+
 
     
 
