@@ -37,6 +37,7 @@ let mongoClient = null;
 let mongoDb = null;
 let hotelTransactions = null;
 let stripeWebhookEvents = null;
+let hotelOfferCatalogues = null;
 
 function formatHotelError(error) {
   if (typeof error === "string") return error;
@@ -101,6 +102,28 @@ await stripeWebhookEvents.createIndex(
 
 console.log("✅ Index anti-doublon Stripe hôtel prêt");
 
+hotelOfferCatalogues = mongoDb.collection(
+    "hotel_offer_catalogues"
+);
+
+// Un catalogue est identifié par un token unique.
+await hotelOfferCatalogues.createIndex(
+    { token: 1 },
+    { unique: true }
+);
+
+// Un catalogue expiré est automatiquement supprimé.
+await hotelOfferCatalogues.createIndex(
+    { expiresAt: 1 },
+    { expireAfterSeconds: 0 }
+);
+
+await hotelOfferCatalogues.createIndex({
+    transactionId: 1
+});
+
+console.log("✅ Collection catalogue hôtel prête");
+
 
         await hotelTransactions.createIndex(
             {
@@ -154,6 +177,10 @@ const HOTEL_TRANSACTION_STATUS = {
 
     OFFER_FOUND:
         "OFFER_FOUND",
+
+        OFFER_SELECTED: "OFFER_SELECTED",
+
+        PREBOOKING: "PREBOOKING",
 
     PREBOOKED:
         "PREBOOKED",
@@ -482,7 +509,8 @@ const stripe = process.env.STRIPE_SECRET_KEY
 
 const HOTEL_STRIPE_PRICE = 1500; // USD 15
 
-const HOTEL_PAYTECH_PRICE = 100; // XOF 8 500
+const HOTEL_PAYTECH_PRICE = 100; // XOF 100 — valeur de test
+
 // ============================================================
 // OFFRES HÔTEL EN ATTENTE DE PAIEMENT STRIPE
 // ============================================================
@@ -586,6 +614,11 @@ app.post(
             "💳 STRIPE EVENT:",
             event.type
         );
+        // ==================================================
+// 🔐 3C.9 — PROTECTION GLOBALE DU WEBHOOK STRIPE
+// ==================================================
+
+try {
 
         // ----------------------------------------------------
         // CHECKOUT TERMINÉ
@@ -611,6 +644,28 @@ app.post(
 
         }
 
+        // ==================================================
+// 🔐 3C.8 — VÉRIFICATION DE L'IDENTIFIANT EVENT STRIPE
+// ==================================================
+
+if (!stripeWebhookEvents) {
+    console.error("❌ STRIPE : collection webhook indisponible");
+    return res.status(500).send("Webhook event storage unavailable");
+}
+
+const alreadyReceivedEvent = await stripeWebhookEvents.findOne({
+    eventId: event.id
+});
+
+if (alreadyReceivedEvent?.status === "PROCESSED") {
+    console.log("♻️ STRIPE : EVENT DÉJÀ TRAITÉ:", event.id);
+
+    return res.status(200).json({
+        received: true,
+        alreadyProcessed: true
+    });
+}
+
         const session =
             event.data.object;
             const metadata =
@@ -619,26 +674,6 @@ app.post(
 const transactionId =
     metadata.transactionId || null;
 
-    await updateHotelTransactionStatus(
-    transactionId,
-    HOTEL_TRANSACTION_STATUS.PAID,
-    {
-        "payment.paymentId":
-            session.payment_intent ||
-            session.id,
-
-        "payment.stripeSessionId":
-            session.id,
-
-        "payment.amount":
-            session.amount_total
-                ? session.amount_total / 100
-                : null,
-
-        "payment.currency":
-            session.currency || "usd"
-    }
-);
 
         // ----------------------------------------------------
         // VÉRIFICATION PAIEMENT
@@ -682,6 +717,218 @@ const transactionId =
 
         }
 
+        // ----------------------------------------------------
+// 🔎 VÉRIFIER LA TRANSACTION DANS MONGODB
+// ----------------------------------------------------
+
+if (!transactionId) {
+    console.error(
+        "❌ STRIPE : transactionId manquant dans les metadata"
+    );
+
+    return res.status(400).send(
+        "transactionId missing"
+    );
+}
+
+if (!hotelTransactions) {
+    console.error(
+        "❌ STRIPE : MongoDB indisponible"
+    );
+
+    return res.status(500).send(
+        "Database unavailable"
+    );
+}
+
+const existingTransaction =
+    await hotelTransactions.findOne({
+        transactionId,
+        type: "hotel"
+    });
+
+if (!existingTransaction) {
+    console.error(
+        "❌ STRIPE : transaction hôtel introuvable:",
+        transactionId
+    );
+
+    return res.status(400).send(
+        "Hotel transaction not found"
+    );
+}
+
+console.log(
+    "✅ TRANSACTION HÔTEL VÉRIFIÉE:",
+    transactionId
+);
+
+// ==================================================
+// 🔐 3C.7 — VÉRIFICATION DU MONTANT STRIPE
+// ==================================================
+
+const expectedPersons =
+    Number(existingTransaction.request?.adults || 0) +
+    Number(existingTransaction.request?.children || 0);
+
+const expectedAmountCents =
+    HOTEL_STRIPE_PRICE * expectedPersons;
+
+const receivedAmountCents =
+    Number(session.amount_total);
+
+const receivedCurrency =
+    String(session.currency || "").toLowerCase();
+
+if (
+    expectedPersons < 1 ||
+    !Number.isInteger(receivedAmountCents) ||
+    receivedAmountCents !== expectedAmountCents ||
+    receivedCurrency !== "usd"
+) {
+    console.error("❌ STRIPE : MONTANT OU DEVISE INVALIDE", {
+        transactionId,
+        expectedPersons,
+        expectedAmountCents,
+        receivedAmountCents,
+        receivedCurrency
+    });
+
+    return res.status(400).send(
+        "Invalid payment amount or currency"
+    );
+}
+
+console.log("✅ STRIPE : MONTANT ET DEVISE VÉRIFIÉS", {
+    transactionId,
+    expectedAmountCents,
+    receivedAmountCents,
+    currency: receivedCurrency
+});
+
+        // ----------------------------------------------------
+// 💰 TRANSACTION → PAID
+// ----------------------------------------------------
+
+        // ==================================================
+// 🔐 3C.6 — ANTI-DOUBLE TRAITEMENT STRIPE
+// ==================================================
+
+const stripePaymentUpdate = await hotelTransactions.updateOne(
+    {
+        transactionId,
+        type: "hotel",
+        status: HOTEL_TRANSACTION_STATUS.PAYMENT_PENDING
+    },
+    {
+        $set: {
+            status: HOTEL_TRANSACTION_STATUS.PAID,
+            updatedAt: new Date(),
+
+            "payment.paymentId":
+                session.payment_intent || session.id,
+
+            "payment.stripeSessionId":
+                session.id,
+
+            "payment.amount":
+                session.amount_total !== null &&
+                session.amount_total !== undefined
+                    ? session.amount_total / 100
+                    : null,
+
+            "payment.currency":
+                session.currency || "usd"
+        },
+
+        $push: {
+            history: {
+                status: HOTEL_TRANSACTION_STATUS.PAID,
+                at: new Date()
+            }
+        }
+    }
+);
+
+// Une seule notification peut faire passer PENDING → PAID.
+if (stripePaymentUpdate.modifiedCount !== 1) {
+
+    const latestTransaction =
+        await hotelTransactions.findOne({
+            transactionId,
+            type: "hotel"
+        });
+
+    if (
+        latestTransaction?.status ===
+        HOTEL_TRANSACTION_STATUS.PAID
+    ) {
+        // L'événement Stripe est bien pris en compte,
+        // même si une autre notification a déjà payé la transaction.
+        await stripeWebhookEvents.updateOne(
+            { eventId: event.id },
+            {
+                $set: {
+                    eventId: event.id,
+                    eventType: event.type,
+                    transactionId,
+                    stripeSessionId: session.id,
+                    status: "PROCESSED",
+                    processedAt: new Date()
+                }
+            },
+            { upsert: true }
+        );
+
+        console.log(
+            "♻️ STRIPE : TRANSACTION DÉJÀ PAYÉE:",
+            transactionId
+        );
+
+        return res.status(200).json({
+            received: true,
+            alreadyProcessed: true
+        });
+    }
+
+    console.error(
+        "❌ STRIPE : TRANSITION DE PAIEMENT REFUSÉE",
+        {
+            transactionId,
+            currentStatus: latestTransaction?.status
+        }
+    );
+
+    return res.status(409).send(
+        "Payment transition rejected"
+    );
+}
+
+// ==================================================
+// 🔐 3C.8 — ENREGISTREMENT EVENT STRIPE TRAITÉ
+// ==================================================
+
+await stripeWebhookEvents.updateOne(
+    { eventId: event.id },
+    {
+        $set: {
+            eventId: event.id,
+            eventType: event.type,
+            transactionId,
+            stripeSessionId: session.id,
+            status: "PROCESSED",
+            processedAt: new Date()
+        }
+    },
+    { upsert: true }
+);
+
+console.log("✅ STRIPE EVENT ENREGISTRÉ:", event.id);
+
+console.log(
+    "✅ STRIPE : PAIEMENT ENREGISTRÉ UNE SEULE FOIS:",
+    transactionId
+);
         // ----------------------------------------------------
         // IDENTIFIANT PAIEMENT
         // ----------------------------------------------------
@@ -848,16 +1095,35 @@ providerCurrency: null
         // FINALISATION RÉSERVATION
         // ----------------------------------------------------
 
-        processHotelAfterPayment(
-            hotelData
-        ).catch(error => {
+        // ----------------------------------------------------
+// ✅ PAIEMENT CONFIRMÉ — EN ATTENTE DU CHOIX CLIENT
+// Aucune recherche, aucun PREBOOK, aucun BOOK ici.
+// ----------------------------------------------------
 
-            console.error(
-                "❌ HOTEL POST-PAYMENT ERROR:",
-                error
-            );
+console.log(
+    "✅ FRAIS TOURIZIA PAYÉS — CLIENT AUTORISÉ À RECHERCHER LES OFFRES:",
+    transactionId
+);
 
-        });
+} catch (error) {
+
+    console.error(
+        "❌ STRIPE WEBHOOK PROCESSING ERROR:",
+        error
+    );
+
+    if (res.headersSent) {
+        console.error(
+            "⚠️ Réponse déjà envoyée à Stripe"
+        );
+        return;
+    }
+
+    return res.status(500).json({
+        received: false,
+        error: "Webhook processing failed"
+    });
+}
 
     }
 );
@@ -1195,6 +1461,394 @@ function formatLiteApiHotelAddress(hotel = {}) {
         ).values()
     ].join(", ");
 }
+
+// ============================================================
+// TOURIZIA — CATALOGUE D'OFFRES HÔTELIÈRES
+// NORMALISATION DES CONDITIONS ET CLASSEMENT
+// ============================================================
+
+
+// ============================================================
+// 🛡️ DÉTAILS DES CONDITIONS D'ANNULATION LITEAPI
+// ============================================================
+
+function getOfferCancellationDetails(offer) {
+
+    const policies = offer.cancellationPolicies || {};
+
+    const tag = String(
+        policies.refundableTag ||
+        policies.refundable ||
+        offer.refundableTag ||
+        offer.refundable ||
+        ""
+    ).trim().toUpperCase();
+
+    const infos = Array.isArray(policies.cancelPolicyInfos)
+        ? policies.cancelPolicyInfos
+        : [];
+
+    const penalties = infos.map(policy => {
+
+        const cancelTime = policy.cancelTime || null;
+
+        const amount = policy.amount ?? null;
+
+        const parsedDate = cancelTime
+            ? new Date(
+                /Z$|[+-]\d{2}:\d{2}$/.test(String(cancelTime))
+                    ? cancelTime
+                    : `${String(cancelTime).replace(" ", "T")}Z`
+            )
+            : null;
+
+        return {
+            cancelTime,
+            amount,
+            currency: policy.currency || offer.currency || null,
+            timezone: policy.timezone || null,
+            parsedDate:
+                parsedDate && !Number.isNaN(parsedDate.getTime())
+                    ? parsedDate
+                    : null
+        };
+    });
+
+    const nonRefundable = [
+        "NRF",
+        "NRFN",
+        "NONREFUNDABLE",
+        "NON_REFUNDABLE"
+    ].includes(tag);
+
+    const refundable = tag === "RFN";
+
+    const now = new Date();
+
+    // Seules les pénalités valides et datées sont exploitables.
+    const validPenalties = penalties.filter(policy =>
+        policy.parsedDate &&
+        policy.amount !== null &&
+        Number.isFinite(Number(policy.amount)) &&
+        Number(policy.amount) >= 0
+    );
+
+    // La gratuité est encore applicable uniquement si
+    // une règle à zéro est datée dans le futur.
+    const freeCancellationDeadlines = validPenalties
+        .filter(policy =>
+            Number(policy.amount) === 0 &&
+            policy.parsedDate > now
+        )
+        .sort((a, b) =>
+            b.parsedDate - a.parsedDate
+        );
+
+    const hasFreeCancellation =
+        refundable &&
+        freeCancellationDeadlines.length > 0;
+
+    const freeCancellationUntil =
+        hasFreeCancellation
+            ? freeCancellationDeadlines[0].cancelTime
+            : null;
+
+    return {
+        tag: tag || "UNKNOWN",
+        refundable,
+        nonRefundable,
+        hasFreeCancellation,
+        freeCancellationUntil,
+        penalties: penalties.map(({ parsedDate, ...policy }) => policy),
+        policyDetailsAvailable: validPenalties.length > 0,
+        raw: policies
+    };
+}
+
+
+// ============================================================
+// 🏆 CLASSEMENT DES OFFRES HÔTELIÈRES
+// ============================================================
+
+function rankHotelOffers(offers) {
+
+    const ranked = [...offers].map(offer => {
+
+        const cancellation =
+            getOfferCancellationDetails(offer);
+
+        const parsedPrice = Number(offer.price);
+
+        const price =
+            offer.price !== null &&
+            offer.price !== undefined &&
+            offer.price !== "" &&
+            Number.isFinite(parsedPrice)
+                ? parsedPrice
+                : null;
+
+        let cancellationRank = 3;
+
+        if (cancellation.hasFreeCancellation) {
+            cancellationRank = 0;
+        } else if (cancellation.refundable) {
+            cancellationRank = 1;
+        } else if (cancellation.nonRefundable) {
+            cancellationRank = 2;
+        }
+
+        return {
+            ...offer,
+            cancellation,
+            price,
+            ranking: {
+                cancellationRank,
+                priceAvailable: price !== null
+            }
+        };
+    });
+
+    ranked.sort((a, b) => {
+
+        // 1. Priorité aux conditions d'annulation.
+        if (
+            a.ranking.cancellationRank !==
+            b.ranking.cancellationRank
+        ) {
+            return (
+                a.ranking.cancellationRank -
+                b.ranking.cancellationRank
+            );
+        }
+
+        // 2. Ne pas comparer des devises différentes.
+        const currencyA = String(a.currency || "").toUpperCase();
+        const currencyB = String(b.currency || "").toUpperCase();
+
+        if (currencyA !== currencyB) {
+            return currencyA.localeCompare(currencyB);
+        }
+
+        // 3. Les prix connus avant les prix absents.
+        if (a.price === null) return 1;
+        if (b.price === null) return -1;
+
+        // 4. Prix croissant à conditions équivalentes.
+        return a.price - b.price;
+    });
+
+    return ranked.map((offer, index) => ({
+        ...offer,
+        position: index + 1
+    }));
+}
+
+
+// ============================================================
+// 🔐 TOURIZIA — STOCKAGE SÉCURISÉ DU CATALOGUE
+// ============================================================
+
+const HOTEL_CATALOGUE_TTL_MINUTES = 20;
+
+
+// ------------------------------------------------------------
+// CRÉER UN CATALOGUE APRÈS LA RECHERCHE LITEAPI
+// ------------------------------------------------------------
+
+async function createHotelOfferCatalogue(
+    transactionId,
+    request,
+    offers
+) {
+    if (!hotelOfferCatalogues) {
+        throw new Error("Collection catalogue MongoDB indisponible");
+    }
+
+    if (!transactionId) {
+        throw new Error("transactionId manquant pour le catalogue");
+    }
+
+    if (!Array.isArray(offers) || offers.length === 0) {
+        throw new Error("Aucune offre à enregistrer");
+    }
+
+    const now = new Date();
+
+    const token = crypto.randomBytes(32).toString("hex");
+
+    const storedOffers = offers.map(offer => {
+        if (!offer.offerId) {
+            throw new Error("Une offre LiteAPI ne possède pas d'offerId");
+        }
+
+        return {
+            selectionId: crypto.randomBytes(16).toString("hex"),
+
+            // Données privées : uniquement côté serveur.
+            offerId: offer.offerId,
+
+            providerOffer: offer
+        };
+    });
+
+    const catalogue = {
+        token,
+        transactionId,
+
+        request: {
+            city: request.city,
+            countryCode: request.countryCode,
+            checkIn: request.checkIn,
+            checkOut: request.checkOut,
+            adults: Number(request.adults || 2),
+            children: Number(request.children || 0),
+            rooms: Number(request.rooms || 1),
+            guestNationality: request.guestNationality || "SN"
+        },
+
+        offers: storedOffers,
+
+        createdAt: now,
+
+        expiresAt: new Date(
+            now.getTime() +
+            HOTEL_CATALOGUE_TTL_MINUTES * 60 * 1000
+        )
+    };
+
+    await hotelOfferCatalogues.insertOne(catalogue);
+
+    console.log(
+        "🔐 CATALOGUE HÔTEL ENREGISTRÉ:",
+        transactionId,
+        "| OFFRES:",
+        storedOffers.length
+    );
+
+    return catalogue;
+}
+
+
+// ------------------------------------------------------------
+// FORMATER UNE OFFRE PUBLIQUE
+// Ne jamais envoyer les données brutes LiteAPI au navigateur.
+// ------------------------------------------------------------
+
+function formatPublicHotelOffer(storedOffer, index) {
+    const offer = storedOffer.providerOffer || {};
+    const cancellation = offer.cancellation || {};
+
+    return {
+        selectionId: storedOffer.selectionId,
+
+        position: index + 1,
+
+        hotel: {
+            id: offer.hotelId || null,
+            name: offer.hotelName || "Hôtel",
+            address: offer.hotelAddress || ""
+        },
+
+        room: {
+            name: offer.roomName || "Chambre"
+        },
+
+        price: offer.price ?? null,
+        currency: offer.currency || "EUR",
+
+        refundable: cancellation.refundable ?? (
+            String(offer.refundableTag || "").toUpperCase() === "RFN"
+        ),
+
+        cancellation: {
+            tag: cancellation.tag || (
+                offer.refundableTag || "UNKNOWN"
+            ),
+
+            refundable: Boolean(cancellation.refundable),
+
+            nonRefundable: Boolean(cancellation.nonRefundable),
+
+            hasFreeCancellation: Boolean(
+                cancellation.hasFreeCancellation
+            ),
+
+            freeCancellationUntil:
+                cancellation.freeCancellationUntil || null,
+
+            policyDetailsAvailable: Boolean(
+                cancellation.policyDetailsAvailable
+            ),
+
+            penalties: Array.isArray(cancellation.penalties)
+                ? cancellation.penalties
+                : []
+        }
+    };
+}
+
+
+// ------------------------------------------------------------
+// RÉCUPÉRER UN CATALOGUE VALIDE
+// ------------------------------------------------------------
+
+async function getHotelOfferCatalogue(token, transactionId) {
+    if (!hotelOfferCatalogues) {
+        throw new Error("Collection catalogue MongoDB indisponible");
+    }
+
+    if (!token || !transactionId) {
+        return null;
+    }
+
+    return await hotelOfferCatalogues.findOne({
+        token,
+        transactionId,
+        expiresAt: {
+            $gt: new Date()
+        }
+    });
+}
+
+
+// ------------------------------------------------------------
+// RETROUVER L'OFFRE CHOISIE PAR LE CLIENT
+// ------------------------------------------------------------
+
+async function getSelectedHotelOffer(
+    token,
+    transactionId,
+    selectionId
+) {
+    if (!selectionId) {
+        return null;
+    }
+
+    const catalogue = await getHotelOfferCatalogue(
+        token,
+        transactionId
+    );
+
+    if (!catalogue) {
+        return null;
+    }
+
+    const selectedOffer = catalogue.offers.find(
+        offer => offer.selectionId === selectionId
+    );
+
+    if (!selectedOffer) {
+        return null;
+    }
+
+    return {
+        catalogue,
+        offer: selectedOffer.providerOffer,
+        offerId: selectedOffer.offerId
+    };
+}
+
+
 // ============================================================
 // RECHERCHE DES OFFRES LITEAPI
 // ============================================================
@@ -1278,18 +1932,13 @@ for (let i = 0; i < rooms; i++) {
 
     occupancies,
 
-    // Demander à LiteAPI uniquement les tarifs remboursables.
-   refundableRatesOnly: refundableOnly,
+    // Toutes les catégories de tarifs
+refundableRatesOnly: false,
 
+roomMapping: true,
 
-    roomMapping:
-        true,
-
-    maxRatesPerHotel: 5,
-
-    includeHotelData:
-        true
-
+// Ne pas limiter artificiellement les tarifs par hôtel
+includeHotelData: true
 };
 
 
@@ -1525,23 +2174,23 @@ for (const hotel of hotels) {
         "🏨 OFFRES TROUVÉES:",
         offers.length
     );
-    // Si aucune offre remboursable n'est trouvée,
-// effectuer une seconde recherche plus large.
-if (offers.length === 0 && refundableOnly && allowFallback) {
-    console.log(
-        "⚠️ Aucune offre remboursable. Recherche de tarifs alternatifs..."
-    );
+   // ========================================================
+// 🏆 CLASSEMENT DU CATALOGUE D'OFFRES
+// ========================================================
 
-    return await searchHotelOffers(data, false, false);
-}
+const rankedOffers = rankHotelOffers(offers);
 
-    return {
+console.log(
+    "🏨 CATALOGUE LITEAPI:",
+    rankedOffers.length,
+    "offres"
+);
 
-        raw: result,
-
-        offers
-
-    };
+return {
+    raw: result,
+    offers: rankedOffers,
+    totalOffers: rankedOffers.length
+};
 
 }
 
@@ -1549,96 +2198,722 @@ if (offers.length === 0 && refundableOnly && allowFallback) {
 // SEARCH HOTELS
 // ============================================================
 
-app.get(
-    "/api/search-hotels",
-    async (req, res) => {
+// ============================================================
+// 🔐 3D.1 — RECHERCHE HÔTEL APRÈS PAIEMENT CONFIRMÉ
+// ============================================================
 
-        try {
 
-            const data = {
+// ============================================================
+// 🔐 3D.2 — RECHERCHE SÉCURISÉE, VERROUILLAGE ET RETRY
+// ============================================================
 
-                city:
-                    req.query.city,
+app.post("/api/search-hotels", async (req, res) => {
 
-                countryCode:
-                    req.query.countryCode ||
-                    "FR",
+    let transactionId = null;
+    let searchClaimed = false;
 
-                checkIn:
-                    req.query.checkIn,
+    try {
 
-                checkOut:
-                    req.query.checkOut,
+        ({ transactionId } = req.body || {});
 
-                adults:
-                    Number(
-                        req.query.adults ||
-                        2
-                    ),
-
-                children:
-                    Number(
-                        req.query.children ||
-                        0
-                    ),
-
-                rooms:
-                    Number(
-                        req.query.rooms ||
-                        1
-                    )
-
-            };
-
-            const result =
-                await searchHotelOffers(
-                    data
-                );
-
-            /*
-             * IMPORTANT :
-             *
-             * Tourizia ne montre pas
-             * une liste d'hôtels au client.
-             *
-             * Le backend utilise les offres
-             * uniquement pour préparer
-             * automatiquement la réservation.
-             */
-
-            res.json({
-
-                success: true,
-
-                available:
-                    result.offers.length > 0,
-
-                offers:
-                    result.offers
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "❌ SEARCH HOTEL ERROR:",
-                error
-            );
-
-            res.status(500).json({
-
+        if (!transactionId) {
+            return res.status(400).json({
                 success: false,
-
-                error:
-                    error.message ||
-                    "Erreur recherche hôtel"
-
+                error: "transactionId manquant"
             });
-
         }
 
+        if (!hotelTransactions || !hotelOfferCatalogues) {
+            return res.status(503).json({
+                success: false,
+                error: "Base de données indisponible"
+            });
+        }
+
+        // 1. Vérifier la transaction
+        const transaction = await hotelTransactions.findOne({
+            transactionId,
+            type: "hotel"
+        });
+
+        if (!transaction) {
+            return res.status(404).json({
+                success: false,
+                error: "Transaction introuvable"
+            });
+        }
+
+        // 2. Vérifier le statut
+        if (transaction.status === HOTEL_TRANSACTION_STATUS.SEARCHING) {
+            return res.status(409).json({
+                success: false,
+                error: "Une recherche est déjà en cours pour cette transaction"
+            });
+        }
+
+        if (transaction.status !== HOTEL_TRANSACTION_STATUS.PAID) {
+            return res.status(403).json({
+                success: false,
+                error: "Transaction non autorisée pour une nouvelle recherche",
+                status: transaction.status
+            });
+        }
+
+        // 3. Récupérer les critères enregistrés côté serveur
+        const searchData = {
+            city: transaction.request.city,
+            countryCode: transaction.request.countryCode,
+            checkIn: transaction.request.checkIn,
+            checkOut: transaction.request.checkOut,
+            adults: transaction.request.adults,
+            children: transaction.request.children,
+            rooms: transaction.request.rooms,
+            guestNationality:
+                transaction.request.guestNationality || "SN"
+        };
+
+        // 4. VERROUILLAGE ATOMIQUE
+        // Une seule requête peut faire PAID → SEARCHING.
+        const claimTime = new Date();
+
+        const claim = await hotelTransactions.updateOne(
+            {
+                transactionId,
+                type: "hotel",
+                status: HOTEL_TRANSACTION_STATUS.PAID
+            },
+            {
+                $set: {
+                    status: HOTEL_TRANSACTION_STATUS.SEARCHING,
+                    updatedAt: claimTime,
+                    error: null
+                },
+                $push: {
+                    history: {
+                        status: HOTEL_TRANSACTION_STATUS.SEARCHING,
+                        at: claimTime
+                    }
+                }
+            }
+        );
+
+        if (claim.modifiedCount !== 1) {
+            return res.status(409).json({
+                success: false,
+                error: "Recherche déjà démarrée ou transaction modifiée"
+            });
+        }
+
+        searchClaimed = true;
+
+        console.log("🔒 RECHERCHE VERROUILLÉE:", transactionId);
+
+        // 5. Recherche LiteAPI
+        const result = await searchHotelOffers(searchData);
+
+        // 6. Aucune offre : libérer le verrou et autoriser un retry
+        if (!result.offers || result.offers.length === 0) {
+
+            const resetTime = new Date();
+
+            await hotelTransactions.updateOne(
+                {
+                    transactionId,
+                    type: "hotel",
+                    status: HOTEL_TRANSACTION_STATUS.SEARCHING
+                },
+                {
+                    $set: {
+                        status: HOTEL_TRANSACTION_STATUS.PAID,
+                        updatedAt: resetTime,
+                        error: null
+                    },
+                    $push: {
+                        history: {
+                            status: HOTEL_TRANSACTION_STATUS.PAID,
+                            at: resetTime
+                        }
+                    }
+                }
+            );
+
+            searchClaimed = false;
+
+            return res.status(200).json({
+                success: true,
+                available: false,
+                retryAllowed: true,
+                message: "Aucune offre disponible. Vous pouvez réessayer."
+            });
+        }
+
+        // 7. Enregistrer le catalogue privé
+        const catalogue = await createHotelOfferCatalogue(
+            transactionId,
+            searchData,
+            result.offers
+        );
+
+        // 8. Transition atomique SEARCHING → OFFER_FOUND
+        const foundTime = new Date();
+
+        const foundUpdate = await hotelTransactions.updateOne(
+            {
+                transactionId,
+                type: "hotel",
+                status: HOTEL_TRANSACTION_STATUS.SEARCHING
+            },
+            {
+                $set: {
+                    status: HOTEL_TRANSACTION_STATUS.OFFER_FOUND,
+                    updatedAt: foundTime,
+                    error: null
+                },
+                $push: {
+                    history: {
+                        status: HOTEL_TRANSACTION_STATUS.OFFER_FOUND,
+                        at: foundTime
+                    }
+                }
+            }
+        );
+
+        if (foundUpdate.modifiedCount !== 1) {
+
+            // Ne pas conserver un catalogue inutilisable.
+            await hotelOfferCatalogues.deleteOne({
+                token: catalogue.token,
+                transactionId
+            });
+
+            searchClaimed = false;
+
+            return res.status(409).json({
+                success: false,
+                error: "La transaction a changé pendant la recherche"
+            });
+        }
+
+        searchClaimed = false;
+
+        // 9. Préparer les offres publiques
+        const publicOffers = catalogue.offers.map(
+            (offer, index) => formatPublicHotelOffer(offer, index)
+        );
+
+        console.log(
+            "✅ OFFRES DISPONIBLES:",
+            transactionId,
+            "|",
+            publicOffers.length
+        );
+
+        return res.json({
+            success: true,
+            available: true,
+            transactionId,
+            catalogueToken: catalogue.token,
+            offers: publicOffers
+        });
+
+    } catch (error) {
+
+        console.error("❌ SECURE HOTEL SEARCH ERROR:", error);
+
+        // 10. En cas d'erreur, libérer le verrou
+        if (searchClaimed && transactionId && hotelTransactions) {
+
+            try {
+
+                const resetTime = new Date();
+
+                await hotelTransactions.updateOne(
+                    {
+                        transactionId,
+                        type: "hotel",
+                        status: HOTEL_TRANSACTION_STATUS.SEARCHING
+                    },
+                    {
+                        $set: {
+                            status: HOTEL_TRANSACTION_STATUS.PAID,
+                            updatedAt: resetTime,
+                            error: "HOTEL_SEARCH_FAILED"
+                        },
+                        $push: {
+                            history: {
+                                status: HOTEL_TRANSACTION_STATUS.PAID,
+                                at: resetTime
+                            }
+                        }
+                    }
+                );
+
+            } catch (resetError) {
+                console.error(
+                    "❌ IMPOSSIBLE DE LIBÉRER LE VERROU:",
+                    resetError
+                );
+            }
+        }
+
+        return res.status(500).json({
+            success: false,
+            retryAllowed: true,
+            error: "Erreur pendant la recherche. Vous pouvez réessayer."
+        });
+
     }
-);
+
+});
+
+
+// ============================================================
+// 🔐 3D.3 — SÉLECTION SÉCURISÉE D'UNE OFFRE HÔTEL
+// ============================================================
+
+app.post("/api/select-hotel-offer", async (req, res) => {
+
+    try {
+
+        const {
+            transactionId,
+            catalogueToken,
+            selectionId
+        } = req.body || {};
+
+        // 1. Vérifier les paramètres
+        if (!transactionId || !catalogueToken || !selectionId) {
+            return res.status(400).json({
+                success: false,
+                error: "transactionId, catalogueToken et selectionId sont obligatoires"
+            });
+        }
+
+        if (!hotelTransactions || !hotelOfferCatalogues) {
+            return res.status(503).json({
+                success: false,
+                error: "Base de données indisponible"
+            });
+        }
+
+        // 2. Vérifier la transaction
+        const transaction = await hotelTransactions.findOne({
+            transactionId,
+            type: "hotel"
+        });
+
+        if (!transaction) {
+            return res.status(404).json({
+                success: false,
+                error: "Transaction introuvable"
+            });
+        }
+
+        if (transaction.status !== HOTEL_TRANSACTION_STATUS.OFFER_FOUND) {
+            return res.status(409).json({
+                success: false,
+                error: "Cette transaction ne permet pas de sélectionner une offre",
+                status: transaction.status
+            });
+        }
+
+        // 3. Retrouver l'offre depuis le catalogue privé
+        const selected = await getSelectedHotelOffer(
+            catalogueToken,
+            transactionId,
+            selectionId
+        );
+
+        if (!selected) {
+            return res.status(404).json({
+                success: false,
+                error: "Offre introuvable ou catalogue expiré"
+            });
+        }
+
+        const offer = selected.offer;
+
+        if (!selected.offerId) {
+            return res.status(400).json({
+                success: false,
+                error: "Identifiant fournisseur de l'offre manquant"
+            });
+        }
+
+        // 4. Enregistrer la sélection de façon atomique
+        const selectedTime = new Date();
+
+        const selectionUpdate = await hotelTransactions.updateOne(
+            {
+                transactionId,
+                type: "hotel",
+                status: HOTEL_TRANSACTION_STATUS.OFFER_FOUND
+            },
+            {
+                $set: {
+                    status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
+                    updatedAt: selectedTime,
+
+                    "provider.hotelId": offer.hotelId || null,
+                    "provider.hotelName": offer.hotelName || null,
+                    "provider.roomName": offer.roomName || null,
+
+                    // Privé : ne jamais renvoyer cet ID au navigateur.
+                    "provider.offerId": selected.offerId,
+
+                    "provider.price": offer.price ?? null,
+                    "provider.currency": offer.currency || null,
+
+                    selectedOffer: {
+                        selectionId,
+                        catalogueToken,
+                        hotelName: offer.hotelName || null,
+                        roomName: offer.roomName || null,
+                        price: offer.price ?? null,
+                        currency: offer.currency || null,
+                        selectedAt: selectedTime
+                    },
+
+                    error: null
+                },
+                $push: {
+                    history: {
+                        status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
+                        at: selectedTime
+                    }
+                }
+            }
+        );
+
+        if (selectionUpdate.modifiedCount !== 1) {
+            return res.status(409).json({
+                success: false,
+                error: "Cette offre a déjà été sélectionnée ou la transaction a changé"
+            });
+        }
+
+        console.log(
+            "✅ OFFRE SÉLECTIONNÉE:",
+            transactionId,
+            "|",
+            offer.hotelName,
+            "|",
+            offer.roomName
+        );
+
+        // 5. Réponse publique : aucun offerId LiteAPI exposé.
+        return res.json({
+            success: true,
+            selected: true,
+            transactionId,
+            status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
+            hotel: {
+                id: offer.hotelId || null,
+                name: offer.hotelName || null
+            },
+            room: {
+                name: offer.roomName || null
+            },
+            price: offer.price ?? null,
+            currency: offer.currency || null,
+            message: "Offre sélectionnée. En attente de vérification PREBOOK."
+        });
+
+    } catch (error) {
+
+        console.error("❌ HOTEL OFFER SELECTION ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            error: "Erreur pendant la sélection de l'offre"
+        });
+
+    }
+
+});
+
+
+// ============================================================
+// 🔐 3D.4 — PREBOOK UNIQUEMENT DE L'OFFRE SÉLECTIONNÉE
+// L'offerId est récupéré exclusivement depuis MongoDB.
+// Le navigateur ne doit jamais envoyer cet identifiant.
+// ============================================================
+
+app.post("/api/prebook-selected-hotel", async (req, res) => {
+    let transactionId = null;
+    let prebookClaimed = false;
+
+    try {
+        transactionId = req.body?.transactionId;
+
+        if (
+            typeof transactionId !== "string" ||
+            !transactionId.trim()
+        ) {
+            return res.status(400).json({
+                success: false,
+                error: "transactionId obligatoire"
+            });
+        }
+
+        if (!hotelTransactions) {
+            return res.status(503).json({
+                success: false,
+                error: "Base de données indisponible"
+            });
+        }
+
+        // 1. Vérifier la transaction et son état.
+        const transaction = await hotelTransactions.findOne({
+            transactionId,
+            type: "hotel"
+        });
+
+        if (!transaction) {
+            return res.status(404).json({
+                success: false,
+                error: "Transaction introuvable"
+            });
+        }
+
+        if (
+            transaction.status !==
+            HOTEL_TRANSACTION_STATUS.OFFER_SELECTED
+        ) {
+            return res.status(409).json({
+                success: false,
+                error: "La transaction ne permet pas ce PREBOOK",
+                status: transaction.status
+            });
+        }
+
+        // 2. L'offerId vient exclusivement de MongoDB.
+        const offerId = transaction.provider?.offerId;
+
+        if (
+            typeof offerId !== "string" ||
+            !offerId.trim()
+        ) {
+            return res.status(409).json({
+                success: false,
+                error: "Identifiant de l'offre sélectionnée absent du dossier serveur"
+            });
+        }
+
+        // 3. Vérifier les critères enregistrés côté serveur.
+        const checkIn = transaction.request?.checkIn;
+
+        if (!checkIn) {
+            return res.status(409).json({
+                success: false,
+                error: "Date d'arrivée absente du dossier de réservation"
+            });
+        }
+
+        // 4. Verrou atomique : OFFER_SELECTED -> PREBOOKING.
+        const claimTime = new Date();
+
+        const claim = await hotelTransactions.updateOne(
+            {
+                transactionId,
+                type: "hotel",
+                status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
+                "provider.offerId": offerId
+            },
+            {
+                $set: {
+                    status: HOTEL_TRANSACTION_STATUS.PREBOOKING,
+                    updatedAt: claimTime
+                },
+                $push: {
+                    history: {
+                        status: HOTEL_TRANSACTION_STATUS.PREBOOKING,
+                        at: claimTime
+                    }
+                }
+            }
+        );
+
+        if (claim.modifiedCount !== 1) {
+            return res.status(409).json({
+                success: false,
+                error: "Un PREBOOK est déjà en cours ou la transaction a changé"
+            });
+        }
+
+        prebookClaimed = true;
+
+        // 5. Appel LiteAPI avec l'offerId récupéré dans MongoDB.
+        console.log(
+            "🔐 3D.4 — PREBOOK DE L'OFFRE SÉLECTIONNÉE:",
+            transactionId
+        );
+
+        const prebook = await prebookHotelOffer(offerId);
+
+        const prebookData = prebook?.data || prebook;
+
+        // 6. Vérifier les conditions d'annulation actualisées.
+        const freshPolicies =
+            getPrebookCancellationPolicies(prebook);
+
+        if (!freshPolicies) {
+            throw new Error(
+                "PREBOOK refusé : politique d'annulation actualisée absente"
+            );
+        }
+
+        const prebookOffer = {
+            ...transaction.provider,
+            cancellationPolicies: freshPolicies,
+            refundable: freshPolicies.refundableTag || null
+        };
+
+        if (
+            !isTouriziaCancellationCompatible(
+                prebookOffer,
+                checkIn
+            )
+        ) {
+            throw new Error(
+                "PREBOOK refusé : les conditions d'annulation actualisées ne respectent pas la politique Tourizia"
+            );
+        }
+
+        // 7. Enregistrer uniquement les informations utiles.
+        // Ne pas enregistrer la réponse LiteAPI complète.
+        const prebookTime = new Date();
+
+        const prebookUpdate = await hotelTransactions.updateOne(
+            {
+                transactionId,
+                type: "hotel",
+                status: HOTEL_TRANSACTION_STATUS.PREBOOKING,
+                "provider.offerId": offerId
+            },
+            {
+                $set: {
+                    status: HOTEL_TRANSACTION_STATUS.PREBOOKED,
+                    updatedAt: prebookTime,
+
+                    "provider.prebookedAt": prebookTime,
+                    "provider.prebookStatus": "SUCCESS",
+
+                    "provider.cancellationPolicies": freshPolicies,
+                    "provider.refundable":
+                        freshPolicies.refundableTag || null,
+
+                    "provider.prebookReference":
+                        prebookData?.prebookId ||
+                        prebookData?.prebookReference ||
+                        null
+                },
+                $push: {
+                    history: {
+                        status: HOTEL_TRANSACTION_STATUS.PREBOOKED,
+                        at: prebookTime
+                    }
+                },
+                $unset: {
+                    error: ""
+                }
+            }
+        );
+
+        if (prebookUpdate.modifiedCount !== 1) {
+            throw new Error(
+                "PREBOOK effectué chez LiteAPI, mais mise à jour MongoDB impossible"
+            );
+        }
+
+        prebookClaimed = false;
+
+        console.log(
+            "✅ 3D.4 PREBOOK VALIDÉ:",
+            transactionId
+        );
+
+        return res.json({
+            success: true,
+            prebooked: true,
+            transactionId,
+            status: HOTEL_TRANSACTION_STATUS.PREBOOKED,
+
+            hotel: {
+                id: transaction.provider.hotelId || null,
+                name: transaction.provider.hotelName || null
+            },
+
+            room: {
+                name: transaction.provider.roomName || null
+            },
+
+            price: transaction.provider.price ?? null,
+            currency: transaction.provider.currency || null,
+
+            cancellation: {
+                refundable: freshPolicies.refundableTag || null,
+                policiesVerified: true
+            },
+
+            message:
+                "Offre sélectionnée et PREBOOK validé par LiteAPI. Aucune réservation définitive n'a encore été effectuée."
+        });
+
+    } catch (error) {
+        console.error(
+            "❌ 3D.4 PREBOOK ERROR:",
+            transactionId,
+            error
+        );
+
+        // Si le PREBOOK échoue, permettre une nouvelle tentative.
+        if (prebookClaimed && transactionId && hotelTransactions) {
+            try {
+                const resetTime = new Date();
+
+                await hotelTransactions.updateOne(
+                    {
+                        transactionId,
+                        type: "hotel",
+                        status: HOTEL_TRANSACTION_STATUS.PREBOOKING
+                    },
+                    {
+                        $set: {
+                            status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
+                            updatedAt: resetTime,
+                            error: {
+                                step: "PREBOOK",
+                                message: error.message,
+                                at: resetTime
+                            }
+                        },
+                        $push: {
+                            history: {
+                                status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
+                                at: resetTime,
+                                reason: "PREBOOK_FAILED"
+                            }
+                        }
+                    }
+                );
+            } catch (resetError) {
+                console.error(
+                    "❌ IMPOSSIBLE DE RÉTABLIR OFFER_SELECTED:",
+                    resetError
+                );
+            }
+        }
+
+        return res.status(500).json({
+            success: false,
+            error: "Le PREBOOK de l'offre sélectionnée a échoué",
+            message: error.message,
+            retryAllowed: prebookClaimed
+        });
+    }
+});
+
 // ============================================================
 // TOURIZIA — BLOC 2/5
 // PREBOOK + SÉLECTION AUTOMATIQUE DE L'OFFRE
@@ -2428,148 +3703,14 @@ console.log(
 // Le backend choisit lui-même l'offre.
 // ============================================================
 
-app.post(
-    "/api/prebook-hotel",
-    async (req, res) => {
-
-        try {
-
-            const data = {
-
-                city:
-                    req.body.city,
-
-                countryCode:
-                    req.body.countryCode ||
-                    "FR",
-
-                checkIn:
-                    req.body.checkIn,
-
-                checkOut:
-                    req.body.checkOut,
-
-                adults:
-                    Number(
-                        req.body.adults ||
-                        2
-                    ),
-
-                children:
-                    Number(
-                        req.body.children ||
-                        0
-                    ),
-
-                rooms:
-                    Number(
-                        req.body.rooms ||
-                        1
-                    ),
-
-                guestNationality:
-                    req.body.guestNationality ||
-                    "SN"
-
-            };
-
-            const validation =
-                validateHotelRequest(
-                    data
-                );
-
-            if (validation) {
-
-                return res.status(400).json({
-
-                    success: false,
-
-                    error:
-                        validation
-
-                });
-
-            }
-
-            console.log(
-                "🏨 PREBOOK REQUEST:"
-            );
-
-            console.log(
-                JSON.stringify(
-                    data,
-                    null,
-                    2
-                )
-            );
-
-            const result =
-                await findPrebookableOffer(
-                    data
-                );
-
-            res.json({
-
-                success: true,
-
-                hotel: {
-
-                    hotelId:
-                        result.offer.hotelId,
-
-                    hotelName:
-                        result.offer.hotelName
-
-                },
-
-                room: {
-
-                    name:
-                        result.offer.roomName
-
-                },
-
-                /*
-                 * Le vrai offerId LiteAPI.
-                 *
-                 * Il peut être conservé
-                 * côté serveur pour le paiement.
-                 */
-                offerId:
-                    result.offer.offerId,
-
-                price:
-                    result.offer.price,
-
-                currency:
-                    result.offer.currency,
-
-                prebook:
-                    result.prebook
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "❌ PREBOOK HOTEL ERROR:",
-                error
-            );
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message ||
-                    "Erreur lors du prébook hôtel"
-
-            });
-
-        }
-
-    }
-);
+// Ancien endpoint désactivé :
+// le client doit sélectionner une offre avant le PREBOOK.
+app.post("/api/prebook-hotel", (req, res) => {
+    return res.status(410).json({
+        success: false,
+        error: "Cet endpoint est désactivé. Utilisez d'abord /api/select-hotel-offer, puis /api/prebook-selected-hotel."
+    });
+});
 
 
 // ============================================================
@@ -3660,37 +4801,150 @@ console.log(
     "🧾 TRANSACTION ID:",
     transactionId
 );
+// ----------------------------------------------------
+// 🔎 VÉRIFIER LA TRANSACTION DANS MONGODB
+// ----------------------------------------------------
+
+if (!hotelTransactions) {
+    console.error(
+        "❌ PAYTECH : MongoDB indisponible"
+    );
+
+    return res
+        .status(500)
+        .send("Database unavailable");
+}
+
+const existingTransaction =
+    await hotelTransactions.findOne({
+        transactionId,
+        type: "hotel"
+    });
+
+if (!existingTransaction) {
+    console.error(
+        "❌ PAYTECH : transaction hôtel introuvable:",
+        transactionId
+    );
+
+    return res
+        .status(400)
+        .send("Hotel transaction not found");
+}
+
+console.log(
+    "✅ TRANSACTION PAYTECH VÉRIFIÉE:",
+    transactionId
+);
+// ----------------------------------------------------
+// 💰 VÉRIFIER LE MONTANT PAYTECH
+// ----------------------------------------------------
+
+const expectedPersons =
+    Number(existingTransaction.request?.adults || 0) +
+    Number(existingTransaction.request?.children || 0);
+
+const expectedAmount =
+    HOTEL_PAYTECH_PRICE * expectedPersons;
+
+const receivedAmount =
+    Number(final_item_price ?? item_price);
+
+if (
+    expectedPersons < 1 ||
+    !Number.isFinite(receivedAmount) ||
+    receivedAmount !== expectedAmount
+) {
+    console.error("❌ PAYTECH : MONTANT INVALIDE", {
+        transactionId,
+        expectedAmount,
+        receivedAmount
+    });
+
+    return res
+        .status(400)
+        .send("Invalid payment amount");
+}
+
+console.log("✅ MONTANT PAYTECH VÉRIFIÉ:", {
+    transactionId,
+    expectedAmount,
+    receivedAmount
+});
 
 // ==================================================
 // 💰 TRANSACTION → PAID
 // ==================================================
 
-await updateHotelTransactionStatus(
+// ==================================================
+// 🔐 3C.5 — ANTI-DOUBLE TRAITEMENT PAYTECH
+// ==================================================
 
-    transactionId,
-
-    HOTEL_TRANSACTION_STATUS.PAID,
-
+const paymentUpdate = await hotelTransactions.updateOne(
     {
+        transactionId,
+        type: "hotel",
+        status: HOTEL_TRANSACTION_STATUS.PAYMENT_PENDING
+    },
+    {
+        $set: {
+            status: HOTEL_TRANSACTION_STATUS.PAID,
+            updatedAt: new Date(),
 
-        "payment.paymentId":
-            ref_command,
+            "payment.paymentId": ref_command,
+            "payment.paytechReference": ref_command,
+            "payment.amount": receivedAmount,
+            "payment.currency": "XOF"
+        },
 
-        "payment.paytechReference":
-            ref_command,
+        $push: {
+            history: {
+                status: HOTEL_TRANSACTION_STATUS.PAID,
+                at: new Date()
+            }
+        }
+    }
+);
 
-        "payment.amount":
-            Number(
-                final_item_price ||
-                item_price ||
-                0
-            ),
+// Une seule notification peut effectuer cette transition.
+if (paymentUpdate.modifiedCount !== 1) {
 
-        "payment.currency":
-            "XOF"
+    const latestTransaction =
+        await hotelTransactions.findOne({
+            transactionId,
+            type: "hotel"
+        });
 
+    if (
+        latestTransaction?.status ===
+        HOTEL_TRANSACTION_STATUS.PAID
+    ) {
+        console.log(
+            "♻️ PAYTECH : NOTIFICATION DÉJÀ TRAITÉE:",
+            transactionId
+        );
+
+        return res
+            .status(200)
+            .send("Already processed");
     }
 
+    console.error(
+        "❌ PAYTECH : TRANSITION DE PAIEMENT REFUSÉE",
+        {
+            transactionId,
+            currentStatus: latestTransaction?.status
+        }
+    );
+
+    return res
+        .status(409)
+        .send("Payment transition rejected");
+}
+
+console.log(
+    "✅ PAYTECH : PAIEMENT ENREGISTRÉ UNE SEULE FOIS:",
+    transactionId
 );
 
 
@@ -3733,17 +4987,18 @@ await updateHotelTransactionStatus(
 
 
             // ==================================================
-            // 🔥 RÉSERVATION LITEAPI
-            // ==================================================
+// ✅ PAIEMENT PAYTECH CONFIRMÉ
+// EN ATTENTE DU CHOIX DU CLIENT
+// ==================================================
 
-            await processHotelAfterPayment(
-                hotelData
-            );
+console.log(
+    "✅ PAYTECH — FRAIS TOURIZIA PAYÉS:",
+    transactionId
+);
 
-
-            console.log(
-                "🎉 PAYTECH HOTEL FINALISÉ"
-            );
+console.log(
+    "⏳ EN ATTENTE DE LA SÉLECTION D'UNE OFFRE HÔTELIÈRE"
+);
 
 
             return res
