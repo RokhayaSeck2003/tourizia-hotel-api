@@ -1324,6 +1324,43 @@ app.get("/api/admin/verify", requireAdmin, (req, res) => {
 });
 
 // ============================================================
+// 🔐 ADMIN — LISTE PRIVÉE DES RÉSERVATIONS HÔTELS
+// ============================================================
+
+app.get("/api/admin/hotel-bookings", requireAdmin, async (req, res) => {
+    try {
+        if (!hotelTransactions) {
+            return res.status(503).json({
+                success: false,
+                error: "MongoDB indisponible"
+            });
+        }
+
+        const bookings = await hotelTransactions
+            .find({})
+            .sort({ createdAt: -1 })
+            .limit(200)
+            .toArray();
+
+        res.set("Cache-Control", "no-store");
+
+        return res.json({
+            success: true,
+            count: bookings.length,
+            bookings
+        });
+
+    } catch (error) {
+        console.error("ADMIN HOTEL BOOKINGS ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            error: "Impossible de récupérer les réservations hôtels"
+        });
+    }
+});
+
+// ============================================================
 // 🏨 STATUT TRANSACTION HÔTEL
 // ============================================================
 
