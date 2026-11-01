@@ -2298,6 +2298,18 @@ for (const hotel of hotels) {
         ...hotelMetadata,
         ...(hotel.hotelData || {})
     };
+    // Récupération des coordonnées officielles de l'établissement
+let hotelDetails = {};
+
+try {
+    hotelDetails = await getLiteApiHotelDetails(hotelId);
+} catch (error) {
+    console.warn(
+        "⚠️ COORDONNÉES LITEAPI INDISPONIBLES:",
+        hotelId,
+        error.message
+    );
+}
 
     for (const room of roomTypes) {
         const rates = Array.isArray(room.rates)
@@ -2353,13 +2365,64 @@ for (const hotel of hotels) {
     "",
 
                 hotelAddress:
-                    hotelData.address ||
-                    hotelData.addressLine ||
-                    hotelData.address1 ||
-                    hotelData.street ||
-                    hotelData.location?.address ||
-                    hotelData.hotelAddress ||
-                    "",
+    formatLiteApiHotelAddress({
+        ...hotelData,
+        ...hotelDetails,
+        address:
+            hotelDetails.address ||
+            hotelData.address ||
+            hotelData.addressLine ||
+            hotelData.address1 ||
+            hotelData.street ||
+            hotelData.location?.address ||
+            hotelData.hotelAddress ||
+            "",
+        city:
+            hotelDetails.city ||
+            hotelDetails.city_name ||
+            hotelData.city ||
+            hotelData.city_name ||
+            data.city,
+        country:
+            hotelDetails.country ||
+            hotelDetails.country_code ||
+            hotelData.countryName ||
+            hotelData.country ||
+            data.countryCode,
+        zip:
+            hotelDetails.zip ||
+            hotelDetails.postalCode ||
+            hotelData.zip ||
+            hotelData.postalCode
+    }),
+
+hotelPhone:
+    hotelDetails.phone ||
+    hotelDetails.phoneNumber ||
+    hotelDetails.telephone ||
+    hotelData.phone ||
+    hotelData.phoneNumber ||
+    "",
+
+hotelEmail:
+    hotelDetails.email ||
+    hotelDetails.contactEmail ||
+    hotelData.email ||
+    "",
+
+hotelWebsite:
+    hotelDetails.website ||
+    hotelDetails.webSite ||
+    hotelDetails.url ||
+    hotelData.website ||
+    "",
+
+hotelOwner:
+    hotelDetails.owner?.name ||
+    hotelDetails.owner?.fullName ||
+    hotelDetails.ownerName ||
+    hotelData.ownerName ||
+    "",
 
                 hotelOwner:
                     hotelData.owner?.name ||
@@ -2790,9 +2853,15 @@ app.post("/api/select-hotel-offer", async (req, res) => {
                     status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
                     updatedAt: selectedTime,
 
-                    "provider.hotelId": offer.hotelId || null,
-                    "provider.hotelName": offer.hotelName || null,
-                    "provider.roomName": offer.roomName || null,
+                   "provider.hotelId": offer.hotelId || null,
+"provider.hotelName": offer.hotelName || null,
+"provider.roomName": offer.roomName || null,
+
+// Coordonnées exactes transmises par LiteAPI
+"provider.hotelAddress": offer.hotelAddress || "",
+"provider.hotelPhone": offer.hotelPhone || "",
+"provider.hotelEmail": offer.hotelEmail || "",
+"provider.hotelWebsite": offer.hotelWebsite || "",
 
                     // Privé : ne jamais renvoyer cet ID au navigateur.
                     "provider.offerId": selected.offerId,
@@ -3444,6 +3513,10 @@ console.log("📅 CONDITIONS D'ANNULATION POUR CONFIRMATION:", {
 
                        "provider.roomName":
     provider.roomName || null,
+    "provider.hotelAddress": provider.hotelAddress || "",
+"provider.hotelPhone": provider.hotelPhone || "",
+"provider.hotelEmail": provider.hotelEmail || "",
+"provider.hotelWebsite": provider.hotelWebsite || "",
 
 "provider.cancellationPolicies":
     cancellationPolicies,
@@ -3516,9 +3589,14 @@ console.log("📅 CONDITIONS D'ANNULATION POUR CONFIRMATION:", {
                 confirmationNumber,
 
                 hotelId: provider.hotelId || "",
-                hotelName: provider.hotelName || "",
-                hotelAddress: provider.hotelAddress || "",
-                roomName: provider.roomName || "",
+hotelName: provider.hotelName || "",
+hotelAddress: provider.hotelAddress || "",
+
+hotelPhone: provider.hotelPhone || "",
+hotelEmail: provider.hotelEmail || "",
+hotelWebsite: provider.hotelWebsite || "",
+
+roomName: provider.roomName || "",
 
                 city: request.city || "",
                 countryCode: request.countryCode || "",
@@ -6672,14 +6750,27 @@ await updateHotelTransactionStatus(
 
     {
 
-        "provider.hotelId":
-            selectedOffer.hotelId || null,
+       "provider.hotelId":
+    selectedOffer.hotelId || null,
 
-        "provider.hotelName":
-            selectedOffer.hotelName || null,
+"provider.hotelName":
+    selectedOffer.hotelName || null,
 
-        "provider.roomName":
-            selectedOffer.roomName || null,
+"provider.roomName":
+    selectedOffer.roomName || null,
+
+// Coordonnées de l'établissement
+"provider.hotelAddress":
+    selectedOffer.hotelAddress || "",
+
+"provider.hotelPhone":
+    selectedOffer.hotelPhone || "",
+
+"provider.hotelEmail":
+    selectedOffer.hotelEmail || "",
+
+"provider.hotelWebsite":
+    selectedOffer.hotelWebsite || "",
 
         "provider.offerId":
             selectedOffer.offerId || null,
@@ -7538,18 +7629,20 @@ function buildCancellationPolicyText(data = {}) {
             amount >= 0
         ) {
             if (amount === 0) {
-                lines.push("Pénalité indiquée : 0 (sans frais selon cette règle)");
+                lines.push(
+    "Frais d’annulation prévus : 0 (sans frais selon cette règle)"
+);
             } else {
                 lines.push(
-                    `Pénalité indiquée : ${amount.toFixed(2)} ${currency}`.trim()
+                    `Montant des frais d’annulation : ${amount.toFixed(2)} ${currency}`.trim()
                 );
             }
         } else {
-            lines.push("Montant de la pénalité : non précisé");
+           lines.push("Montant des frais d’annulation : non précisé");
         }
 
         if (policy.cancelType) {
-            lines.push(`Type de pénalité : ${String(policy.cancelType)}`);
+           lines.push(`Type de frais d’annulation : ${String(policy.cancelType)}`);
         }
 
         lines.push("");
@@ -7643,6 +7736,18 @@ const destination =
         Number(data.rooms || 1);
        
 const refundable = data.refundable || null;
+const providerPriceNumber = Number(data.providerPrice);
+
+const providerPriceLabel =
+    data.providerPrice !== null &&
+    data.providerPrice !== undefined &&
+    data.providerPrice !== "" &&
+    Number.isFinite(providerPriceNumber)
+        ? `${providerPriceNumber.toLocaleString("fr-FR", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+          })} ${String(data.providerCurrency || "").trim()}`.trim()
+        : "";
 
 const cancellationPolicy =
     buildCancellationPolicyText(data);
@@ -8226,6 +8331,7 @@ ${
         : ""
 }
 
+
         ${
             data.hotelPhone
                 ? `
@@ -8402,30 +8508,47 @@ ${
 
 
         ${
-            refundable
-                ? `
-                    <div class="section">
+    refundable || providerPriceLabel
+        ? `
+            <div class="section">
 
-                        <div class="section-title">
-                            Conditions tarifaires
-                        </div>
+                <div class="section-title">
+                    Conditions tarifaires
+                </div>
 
-                        <div class="notice">
+                <div class="notice">
 
-                            ${escapeHtml(
-                                typeof refundable === "string"
-                                    ? refundable
-                                    : JSON.stringify(
-                                        refundable
-                                    )
-                            )}
+                    ${
+                        providerPriceLabel
+                            ? `
+                                <div style="font-weight:700; margin-bottom:6px;">
+                                    Prix total de la chambre :
+                                    ${escapeHtml(providerPriceLabel)}
+                                </div>
+                              `
+                            : ""
+                    }
 
-                        </div>
+                    ${
+                        refundable
+                            ? `
+                                <div>
+                                    ${escapeHtml(
+                                        typeof refundable === "string"
+                                            ? refundable
+                                            : JSON.stringify(refundable)
+                                    )}
+                                </div>
+                              `
+                            : ""
+                    }
 
-                    </div>
-                  `
-                : ""
-        }
+                </div>
+
+            </div>
+          `
+        : ""
+}
 
         <div class="section">
 
