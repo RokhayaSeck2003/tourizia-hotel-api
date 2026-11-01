@@ -1968,10 +1968,11 @@ function formatPublicHotelOffer(storedOffer, index) {
         position: index + 1,
 
         hotel: {
-            id: offer.hotelId || null,
-            name: offer.hotelName || "Hôtel",
-            address: offer.hotelAddress || ""
-        },
+    id: offer.hotelId || null,
+    name: offer.hotelName || "Hôtel",
+    address: offer.hotelAddress || "",
+    image: offer.hotelImage || ""
+},
 
         room: {
             name: offer.roomName || "Chambre"
@@ -2342,6 +2343,14 @@ for (const hotel of hotels) {
                     hotelData.name ||
                     hotel.name ||
                     "",
+                    hotelImage:
+    hotelData.main_photo ||
+    hotelData.mainPhoto ||
+    hotelData.thumbnail ||
+    hotelData.image ||
+    hotelData.images?.[0]?.url ||
+    hotelData.images?.[0] ||
+    "",
 
                 hotelAddress:
                     hotelData.address ||
@@ -2633,12 +2642,15 @@ app.post("/api/search-hotels", async (req, res) => {
         );
 
         return res.json({
-            success: true,
-            available: true,
-            transactionId,
-            catalogueToken: catalogue.token,
-            offers: publicOffers
-        });
+    success: true,
+    available: true,
+    transactionId,
+    catalogueToken: catalogue.token,
+
+    request: catalogue.request,
+
+    offers: publicOffers
+});
 
     } catch (error) {
 
