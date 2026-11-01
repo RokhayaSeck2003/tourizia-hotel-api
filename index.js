@@ -2150,7 +2150,7 @@ for (let i = 0; i < rooms; i++) {
         data.checkOut,
 
     currency:
-        "EUR",
+    "USD",
 
     guestNationality:
         data.guestNationality || "SN",
@@ -4054,6 +4054,17 @@ async function findPrebookableOffer(data) {
 
             const offers =
                 searchResult.offers || [];
+                // ======================================================
+// TOURIZIA — LIMITE D'AFFICHAGE À 100 OFFRES
+// Le catalogue complet reste conservé côté serveur.
+// ======================================================
+
+const MAX_VISIBLE_HOTEL_OFFERS = 100;
+
+const displayedOffers = offers.slice(
+    0,
+    MAX_VISIBLE_HOTEL_OFFERS
+);
 
             console.log(
                 `🏨 OFFRES REÇUES: ${offers.length}`
@@ -8277,21 +8288,26 @@ ${
 
 
             <div class="card">
-
     <div class="label">
-        Adresse de l'établissement
+        ✦ VOTRE ESPACE DE SÉJOUR
     </div>
 
-    <div
-        class="value"
-        style="
-            font-size:12px;
-            line-height:1.45;
-        "
-    >
-        ${escapeHtml(hotelAddress)}
+    <div class="value" style="
+        font-size:13px;
+        line-height:1.5;
+        color:#142238;
+        font-weight:750;
+    ">
+        ${escapeHtml(roomName)}
     </div>
 
+    <div style="
+        margin-top:5px;
+        font-size:10px;
+        color:#718096;
+    ">
+        Catégorie de chambre communiquée par l'établissement
+    </div>
 </div>
 
         </div>
