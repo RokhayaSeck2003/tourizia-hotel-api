@@ -7580,9 +7580,9 @@ function buildHotelPDFHTML(
     data.hotelName ||
     "Établissement";
 
-const hotelAddress =
-    data.hotelAddress ||
-    "Adresse non disponible";
+// Adresse exacte fournie par LiteAPI / le BOOK confirmé.
+// Si elle est absente, ne rien afficher : ne jamais en inventer une.
+const hotelAddress = String(data.hotelAddress || "").trim();
 
 
 const hotelOwner =
@@ -8070,18 +8070,23 @@ body {
     <strong>Hôtel :</strong>
     ${escapeHtml(hotelName)}
 </div>
-
-<div
-    style="
-        margin-top:6px;
-        font-size:13px;
-        color:#53616c;
-        line-height:1.5;
-    "
->
-    <strong>Adresse :</strong>
-    ${escapeHtml(hotelAddress)}
-</div>
+${
+    hotelAddressForPdf
+        ? `
+            <div
+                style="
+                    margin-top:6px;
+                    font-size:13px;
+                    color:#53616c;
+                    line-height:1.5;
+                "
+            >
+                <strong>Adresse exacte de l'hôtel :</strong>
+                ${escapeHtml(hotelAddressForPdf)}
+            </div>
+          `
+        : ""
+}
 
 
         ${
@@ -8205,17 +8210,21 @@ body {
 
         </div>
 
-        <div class="row">
+       ${
+    hotelAddressForPdf
+        ? `
+            <div class="row">
+                <div class="row-label">
+                    Adresse
+                </div>
 
-            <div class="row-label">
-                Adresse
+                <div class="row-value">
+                    ${escapeHtml(hotelAddressForPdf)}
+                </div>
             </div>
-
-            <div class="row-value">
-                ${escapeHtml(hotelAddress)}
-            </div>
-
-        </div>
+          `
+        : ""
+}
 
         ${
             data.hotelPhone
