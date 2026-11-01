@@ -2977,32 +2977,30 @@ app.post("/api/prebook-selected-hotel", async (req, res) => {
 
         const prebookData = prebook?.data || prebook;
 
-        // 6. Vérifier les conditions d'annulation actualisées.
-        const freshPolicies =
-            getPrebookCancellationPolicies(prebook);
+       // 6. POLITIQUE D'ANNULATION : PRIORITÉ À L'OFFRE LITEAPI
+// Le client a choisi librement cette offre.
+// Tourizia ne filtre ni ne rejette ses conditions d'annulation.
 
-        if (!freshPolicies) {
-            throw new Error(
-                "PREBOOK refusé : politique d'annulation actualisée absente"
-            );
-        }
+const freshPolicies =
+    getPrebookCancellationPolicies(prebook);
 
-        const prebookOffer = {
-            ...transaction.provider,
-            cancellationPolicies: freshPolicies,
-            refundable: freshPolicies.refundableTag || null
-        };
+const providerPolicies =
+    freshPolicies ||
+    transaction.provider?.cancellationPolicies ||
+    null;
 
-        if (
-            !isTouriziaCancellationCompatible(
-                prebookOffer,
-                checkIn
-            )
-        ) {
-            throw new Error(
-                "PREBOOK refusé : les conditions d'annulation actualisées ne respectent pas la politique Tourizia"
-            );
-        }
+const providerRefundable =
+    providerPolicies?.refundableTag ??
+    providerPolicies?.refundable ??
+    transaction.provider?.refundable ??
+    null;
+
+console.log("📅 POLITIQUE FOURNISSEUR CONSERVÉE:", {
+    hotel: transaction.provider?.hotelName,
+    room: transaction.provider?.roomName,
+    refundable: providerRefundable,
+    policyAvailable: Boolean(providerPolicies)
+});
 
         // 7. Enregistrer uniquement les informations utiles.
         // Ne pas enregistrer la réponse LiteAPI complète.
@@ -3036,9 +3034,8 @@ const prebookTime = new Date();
                     "provider.prebookedAt": prebookTime,
                     "provider.prebookStatus": "SUCCESS",
 
-                    "provider.cancellationPolicies": freshPolicies,
-                    "provider.refundable":
-                        freshPolicies.refundableTag || null,
+                   "provider.cancellationPolicies": providerPolicies,
+"provider.refundable": providerRefundable,
 
                    "provider.prebookId": prebookId,
 
@@ -3088,9 +3085,11 @@ const prebookTime = new Date();
             currency: transaction.provider.currency || null,
 
             cancellation: {
-                refundable: freshPolicies.refundableTag || null,
-                policiesVerified: true
-            },
+    refundable: providerRefundable,
+    policies: providerPolicies,
+    policiesVerified: Boolean(providerPolicies),
+    source: "LiteAPI"
+},
 
             message:
                 "Offre sélectionnée et PREBOOK validé par LiteAPI. Aucune réservation définitive n'a encore été effectuée."
@@ -3351,6 +3350,29 @@ app.post("/api/book-selected-hotel", async (req, res) => {
             bookingDataResult?.reference ||
             bookingId;
 
+            // ========================================================
+// 📅 CONDITIONS D'ANNULATION : BOOK → PREBOOK → LITEAPI
+// ========================================================
+
+const cancellationPolicies =
+    bookingDataResult?.cancellationPolicies ||
+    transaction.provider?.cancellationPolicies ||
+    null;
+
+const refundableTag =
+    bookingDataResult?.refundableTag ||
+    cancellationPolicies?.refundableTag ||
+    cancellationPolicies?.refundable ||
+    transaction.provider?.refundable ||
+    null;
+
+console.log("📅 CONDITIONS D'ANNULATION POUR CONFIRMATION:", {
+    source: bookingDataResult?.cancellationPolicies
+        ? "BOOK_LITEAPI"
+        : "PREBOOK_LITEAPI",
+    policyAvailable: Boolean(cancellationPolicies),
+    refundableTag
+});
         // Sans référence exploitable, ne pas annoncer une confirmation.
         if (!bookingId && !confirmationNumber) {
             await hotelTransactions.updateOne(
@@ -3408,8 +3430,28 @@ app.post("/api/book-selected-hotel", async (req, res) => {
                         "provider.hotelName":
                             provider.hotelName || null,
 
-                        "provider.roomName":
-                            provider.roomName || null
+                       "provider.roomName":
+    provider.roomName || null,
+
+"provider.cancellationPolicies":
+    cancellationPolicies,
+
+"provider.refundable":
+    refundableTag,
+
+"cancellation.allowed":
+    Boolean(cancellationPolicies),
+
+"cancellation.policy": {
+    refundableTag,
+    cancelPolicyInfos:
+        cancellationPolicies?.cancelPolicyInfos || [],
+    hotelRemarks:
+        cancellationPolicies?.hotelRemarks || []
+},
+
+"cancellation.status": "ACTIVE"
+
                     },
                     $push: {
                         history: {
@@ -3487,7 +3529,10 @@ app.post("/api/book-selected-hotel", async (req, res) => {
                 providerPrice: provider.price || null,
                 providerCurrency: provider.currency || "",
 
-                refundable: provider.refundable || null
+               refundable: refundableTag,
+
+cancellationPolicies:
+    cancellationPolicies
             };
 
             const documentResult =
