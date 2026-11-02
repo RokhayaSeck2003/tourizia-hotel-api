@@ -447,34 +447,39 @@ async function updateHotelTransactionStatus(
 // 🔄 MISE À JOUR DES INFORMATIONS TRANSACTION
 // ============================================================
 
-async function updateHotelTransaction(
-    transactionId,
-    fields = {}
-) {
-
-    if (
-        !hotelTransactions ||
-        !transactionId
-    ) {
-        return;
+async function updateHotelTransaction(transactionId, fields = {}) {
+    if (!hotelTransactions) {
+        throw new Error("MongoDB indisponible : documents non enregistrés");
     }
 
-    await hotelTransactions.updateOne(
-        {
-            transactionId
-        },
+    if (!transactionId) {
+        throw new Error("transactionId manquant : documents non enregistrés");
+    }
+
+    const result = await hotelTransactions.updateOne(
+        { transactionId: String(transactionId) },
         {
             $set: {
-
                 ...fields,
-
-                updatedAt:
-                    new Date()
-
+                updatedAt: new Date()
             }
         }
     );
 
+    console.log("📄 HOTEL DOCUMENTS UPDATE:", {
+        transactionId,
+        matchedCount: result.matchedCount,
+        modifiedCount: result.modifiedCount,
+        pdfCount: fields["documents.hotelConfirmationPdfs"]?.length || 0
+    });
+
+    if (result.matchedCount === 0) {
+        throw new Error(
+            `Aucune transaction MongoDB trouvée pour ${transactionId}`
+        );
+    }
+
+    return result;
 }
 
 const app = express();
