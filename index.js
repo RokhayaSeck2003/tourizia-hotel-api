@@ -258,27 +258,16 @@ async function createHotelTransaction(
         status:
             HOTEL_TRANSACTION_STATUS.PAYMENT_PENDING,
 
-        payment: {
-
-            method:
-                data.paymentMethod || null,
-
-            paymentId:
-                null,
-
-            stripeSessionId:
-                null,
-
-            paytechReference:
-                null,
-
-            amount:
-                null,
-
-            currency:
-                null
-
-        },
+       payment: {
+    status: "PENDING",
+    method: data.paymentMethod || null,
+    paymentId: null,
+    stripeSessionId: null,
+    paytechReference: null,
+    amount: null,
+    currency: null,
+    paidAt: null
+},
 
         customer: {
 
@@ -340,6 +329,15 @@ async function createHotelTransaction(
     price: null,
     currency: null
 
+},
+documents: {
+    hotelConfirmationPdfs: [],
+    confirmationNumber: null,
+    generatedAt: null,
+    emailSent: false,
+    storageStatus: "PENDING",
+    storageErrors: [],
+    emailError: null
 },
 
 cancellation: {
@@ -844,6 +842,10 @@ const stripePaymentUpdate = await hotelTransactions.updateOne(
                     ? session.amount_total / 100
                     : null,
 
+                    "payment.status": "PAID",
+"payment.method": "stripe",
+"payment.paidAt": new Date(),
+
             "payment.currency":
                 session.currency || "usd"
         },
@@ -867,8 +869,7 @@ if (stripePaymentUpdate.modifiedCount !== 1) {
         });
 
     if (
-        latestTransaction?.status ===
-        HOTEL_TRANSACTION_STATUS.PAID
+        latestTransaction?.payment?.status === "PAID"
     ) {
         // L'événement Stripe est bien pris en compte,
         // même si une autre notification a déjà payé la transaction.
@@ -1359,6 +1360,121 @@ app.get("/api/admin/hotel-bookings", requireAdmin, async (req, res) => {
         });
     }
 });
+
+// ============================================================
+// 🔐 ADMIN — TÉLÉCHARGEMENT SÉCURISÉ PDF HÔTEL
+// ============================================================
+
+app.get(
+    "/api/admin/hotel-bookings/:transactionId/documents/:guestNumber",
+    requireAdmin,
+    async (req, res) => {
+
+        try {
+
+            if (!hotelTransactions) {
+                return res.status(503).json({
+                    success: false,
+                    error: "MongoDB indisponible"
+                });
+            }
+
+            const { transactionId } = req.params;
+
+            const guestNumber = Number(
+                req.params.guestNumber
+            );
+
+            if (
+                !transactionId ||
+                !Number.isInteger(guestNumber) ||
+                guestNumber < 1
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Paramètres de téléchargement invalides"
+                });
+            }
+
+            // Récupérer uniquement une transaction hôtel.
+            const transaction = await hotelTransactions.findOne({
+                transactionId,
+                type: "hotel"
+            });
+
+            if (!transaction) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Réservation hôtel introuvable"
+                });
+            }
+
+            const documents =
+                transaction.documents?.hotelConfirmationPdfs || [];
+
+            const document = documents.find(
+                item => Number(item.guestNumber) === guestNumber
+            );
+
+            if (!document || !document.publicId) {
+                return res.status(404).json({
+                    success: false,
+                    error: "PDF introuvable pour ce voyageur"
+                });
+            }
+
+            if (
+                !process.env.CLOUDINARY_CLOUD_NAME ||
+                !process.env.CLOUDINARY_API_KEY ||
+                !process.env.CLOUDINARY_API_SECRET
+            ) {
+                return res.status(503).json({
+                    success: false,
+                    error: "Configuration Cloudinary indisponible"
+                });
+            }
+
+            // Générer un lien signé valable 60 secondes.
+            const expiresAt =
+                Math.floor(Date.now() / 1000) + 60;
+
+            const downloadUrl =
+                cloudinary.utils.private_download_url(
+                    document.publicId,
+                    document.format || "pdf",
+                    {
+                        resource_type: "raw",
+                        type: "authenticated",
+                        expires_at: expiresAt,
+                        attachment: true
+                    }
+                );
+
+            res.set("Cache-Control", "private, no-store");
+
+            return res.json({
+                success: true,
+                downloadUrl,
+                filename:
+                    document.filename ||
+                    `reservation-hotel-${transactionId}-personne-${guestNumber}.pdf`,
+                expiresIn: 60
+            });
+
+        } catch (error) {
+
+            console.error(
+                "❌ ADMIN HOTEL PDF DOWNLOAD ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                error: "Impossible de générer le lien du PDF"
+            });
+        }
+    }
+);
 
 // ============================================================
 // 🏨 STATUT TRANSACTION HÔTEL
@@ -5730,10 +5846,13 @@ const paymentUpdate = await hotelTransactions.updateOne(
             status: HOTEL_TRANSACTION_STATUS.PAID,
             updatedAt: new Date(),
 
-            "payment.paymentId": ref_command,
-            "payment.paytechReference": ref_command,
-            "payment.amount": receivedAmount,
-            "payment.currency": "XOF"
+          "payment.status": "PAID",
+"payment.method": hotelData.paymentMethod,
+"payment.paymentId": ref_command,
+"payment.paytechReference": ref_command,
+"payment.amount": receivedAmount,
+"payment.currency": "XOF",
+"payment.paidAt": new Date()
         },
 
         $push: {
@@ -5755,8 +5874,7 @@ if (paymentUpdate.modifiedCount !== 1) {
         });
 
     if (
-        latestTransaction?.status ===
-        HOTEL_TRANSACTION_STATUS.PAID
+       latestTransaction?.payment?.status === "PAID"
     ) {
         console.log(
             "♻️ PAYTECH : NOTIFICATION DÉJÀ TRAITÉE:",
@@ -7187,16 +7305,45 @@ try {
    
 
     const documentResult =
-        await generateAndSendHotelConfirmation(
-            finalBooking
-        );
-       await updateHotelTransactionStatus
+    await generateAndSendHotelConfirmation(
+        finalBooking
+    );
 
-    finalBooking.pdfUrl =
-        documentResult.pdfUrl;
+finalBooking.confirmationNumber =
+    documentResult.reference;
 
-    finalBooking.confirmationNumber =
-        documentResult.reference;
+// Enregistrement des documents dans MongoDB
+await updateHotelTransaction(data.transactionId, {
+
+    "documents.hotelConfirmationPdfs":
+        documentResult.pdfDocuments,
+
+    "documents.confirmationNumber":
+        documentResult.reference,
+
+    "documents.generatedAt":
+        new Date(),
+
+    "documents.emailSent":
+        documentResult.emailSent,
+
+    "documents.storageStatus":
+        documentResult.storageStatus,
+
+    "documents.storageErrors":
+        documentResult.storageErrors,
+
+    "documents.emailError":
+        documentResult.emailError
+
+});
+
+console.log(
+    "✅ DOCUMENTS HÔTEL ENREGISTRÉS DANS MONGODB:",
+    data.transactionId,
+    "| PDF:",
+    documentResult.pdfDocuments.length
+);
 
 } catch (error) {
 
@@ -8807,69 +8954,48 @@ async function generateHotelPDF(html) {
 
 async function uploadHotelPDF(
     pdf,
-    reference
+    reference,
+    guestNumber = 1
 ) {
-
     if (!pdf) {
-
-        throw new Error(
-            "PDF hôtel vide"
-        );
-
+        throw new Error("PDF hôtel vide");
     }
 
-    const tempPath =
-        path.join(
-            "/tmp",
-            `hotel-${reference}.pdf`
-        );
-
-    fs.writeFileSync(
-        tempPath,
-        pdf
+    const tempPath = path.join(
+        "/tmp",
+        `hotel-${reference}-personne-${guestNumber}.pdf`
     );
 
+    fs.writeFileSync(tempPath, pdf);
+
     try {
-
-        const result =
-            await cloudinary.uploader.upload(
-                tempPath,
-                {
-                    resource_type:
-                        "raw",
-
-                    folder:
-                        "tourizia-hotels",
-
-                    public_id:
-                        `hotel-${reference}`
-
-                }
-            );
-
-        console.log(
-            "☁️ HOTEL PDF CLOUDINARY:",
-            result.secure_url
+        const result = await cloudinary.uploader.upload(
+            tempPath,
+            {
+                resource_type: "raw",
+                type: "authenticated",
+                folder: "tourizia-hotels",
+                public_id: `hotel-${reference}-personne-${guestNumber}`
+            }
         );
 
-        return result.secure_url;
+        console.log(
+            "☁️ HOTEL PDF ENREGISTRÉ:",
+            result.public_id
+        );
+
+        return {
+            publicId: result.public_id,
+            resourceType: result.resource_type,
+            format: result.format || "pdf",
+            guestNumber
+        };
 
     } finally {
-
-        if (
-            fs.existsSync(
-                tempPath
-            )
-        ) {
-
-            fs.unlinkSync(
-                tempPath
-            );
-
+        if (fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
         }
-
     }
-
 }
 
 
@@ -9315,7 +9441,9 @@ async function generateAndSendHotelConfirmation(
     // GÉNÉRER UN PDF PAR PERSONNE
     // ========================================================
 
-    const pdfs = [];
+   const pdfs = [];
+const pdfDocuments = [];
+const storageErrors = [];
 
 
     for (
@@ -9376,6 +9504,33 @@ async function generateAndSendHotelConfirmation(
             await generateHotelPDF(
                 html
             );
+           // Enregistrement sécurisé du PDF sur Cloudinary
+try {
+
+    const storedDocument = await uploadHotelPDF(
+        pdf,
+        reference,
+        i + 1
+    );
+
+    pdfDocuments.push({
+        ...storedDocument,
+        filename: `reservation-hotel-${reference}-personne-${i + 1}.pdf`
+    });
+
+} catch (uploadError) {
+
+    console.error(
+        "❌ ERREUR STOCKAGE PDF CLOUDINARY:",
+        uploadError.message
+    );
+
+    storageErrors.push({
+        guestNumber: i + 1,
+        message: uploadError.message
+    });
+
+}
 
 
         console.log(
@@ -9409,11 +9564,33 @@ async function generateAndSendHotelConfirmation(
     // EMAIL UNIQUE AVEC TOUS LES PDF
     // ========================================================
 
+   let emailSent = false;
+let emailError = null;
+
+try {
+
     await sendHotelEmail(
         booking,
         pdfs,
         reference
     );
+
+    emailSent = true;
+
+    console.log(
+        "✅ EMAIL CLIENT ENVOYÉ AVEC SUCCÈS"
+    );
+
+} catch (error) {
+
+    emailError = error.message;
+
+    console.error(
+        "❌ EMAIL CLIENT NON ENVOYÉ:",
+        error
+    );
+
+}
 
 
     console.log(
@@ -9443,15 +9620,21 @@ async function generateAndSendHotelConfirmation(
         "======================================"
     );
 
+const storageStatus =
+    pdfDocuments.length === guests.length
+        ? "COMPLETE"
+        : pdfDocuments.length > 0
+            ? "PARTIAL"
+            : "FAILED";
 
-    return {
-
-        reference,
-
-        pdfUrl:
-            null
-
-    };
+return {
+    reference,
+    pdfDocuments,
+    emailSent,
+    emailError,
+    storageStatus,
+    storageErrors
+};
 
 }
 
@@ -9674,23 +9857,31 @@ app.post(
                     data
                 );
 
-            return res.json({
+           return res.status(
+    result.emailSent ? 200 : 502
+).json({
 
-                success: true,
+    success: result.emailSent,
 
-                message:
-                    "PDF généré et email envoyé.",
+    message: result.emailSent
+        ? "PDF généré et email envoyé."
+        : "PDF généré, mais l'email n'a pas été envoyé.",
 
-                email:
-                    data.email,
+    email: data.email,
 
-                reference:
-                    result.reference,
+    reference: result.reference,
 
-                pdfUrl:
-                    result.pdfUrl
+    emailSent: result.emailSent,
 
-            });
+    emailError: result.emailError,
+
+    storageStatus: result.storageStatus,
+
+    pdfCount: result.pdfDocuments?.length || 0,
+
+    storageErrors: result.storageErrors || []
+
+});
 
         } catch (error) {
 
