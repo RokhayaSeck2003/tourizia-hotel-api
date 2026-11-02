@@ -2340,30 +2340,35 @@ for (let i = 0; i < rooms; i++) {
     remainingChildren -= roomChildren;
 }
 
-    const requestBody = {
+    
+const requestBody = {
+    checkin: data.checkIn,
+    checkout: data.checkOut,
 
-    checkin:
-        data.checkIn,
-
-    checkout:
-        data.checkOut,
-
-    currency:
-    "USD",
+    currency: "USD",
 
     guestNationality:
         data.guestNationality || "SN",
 
     occupancies,
 
-    // Toutes les catégories de tarifs
-refundableRatesOnly: false,
+    // Accepter les tarifs remboursables et non remboursables.
+    refundableRatesOnly: false,
 
-roomMapping: true,
+    // Récupérer plusieurs tarifs par hôtel.
+    maxRatesPerHotel: 10,
 
-// Ne pas limiter artificiellement les tarifs par hôtel
-includeHotelData: true
+    // Augmenter le nombre d'hôtels examinés.
+    limit: 5000,
+    offset: 0,
+
+    // Laisser LiteAPI travailler jusqu'à 12 secondes.
+    timeout: 12,
+
+    roomMapping: true,
+    includeHotelData: true
 };
+
 
 
 // ========================================================
@@ -2458,17 +2463,48 @@ console.log(
 
     }
 
-   const offers = [];
+   
+const offers = [];
 
-const hotels =
-    result.data || [];
+const hotels = Array.isArray(result.data)
+    ? result.data
+    : result.data && typeof result.data === "object"
+        ? [result.data]
+        : [];
 
 const hotelMetadataById = new Map(
-    (result.hotels || []).map(hotel => [
-        String(hotel.id || hotel.hotelId),
-        hotel
-    ])
+    (Array.isArray(result.hotels) ? result.hotels : [])
+        .map(hotel => [
+            String(hotel.id || hotel.hotelId || ""),
+            hotel
+        ])
+        .filter(([id]) => id)
 );
+
+console.log("🏨 LITEAPI — DIAGNOSTIC RÉPONSE:", {
+    httpStatus: response.status,
+    responseCode: result.code ?? null,
+    responseMessage: result.message ?? null,
+    hotelsReceived: hotels.length,
+    metadataReceived: hotelMetadataById.size
+});
+
+if (!hotels.length) {
+    console.warn(
+        "⚠️ LITEAPI N'A RETOURNÉ AUCUN HÔTEL POUR CES CRITÈRES",
+        {
+            city: data.city,
+            countryCode: data.countryCode,
+            checkIn: data.checkIn,
+            checkOut: data.checkOut,
+            adults,
+            children,
+            rooms,
+            guestNationality: data.guestNationality || "SN"
+        }
+    );
+}
+
 
     /*
      * IMPORTANT :
@@ -2486,7 +2522,18 @@ const hotelMetadataById = new Map(
 
     
 for (const hotel of hotels) {
-    const roomTypes = hotel.roomTypes || [];
+
+    const roomTypes = Array.isArray(hotel.roomTypes)
+        ? hotel.roomTypes
+        : [];
+
+    if (!roomTypes.length) {
+        console.warn(
+            "⚠️ HÔTEL SANS ROOMTYPES:",
+            hotel.hotelId || hotel.id
+        );
+        continue;
+    }
 
     const hotelId = hotel.hotelId || hotel.id;
 
@@ -2519,21 +2566,37 @@ try {
             // L'offre doit avoir un véritable offerId.
             const offerId = rate.offerId || room.offerId;
 
-            if (!offerId) continue;
+if (!offerId) {
+    console.warn(
+        "⚠️ TARIF IGNORÉ — offerId manquant:",
+        hotelId,
+        room.name || room.roomName
+    );
+    continue;
+}
 
-            const retailRate = rate.retailRate || {};
+            
+const retailRate = rate.retailRate || {};
 
-            const price =
-                retailRate.total?.[0]?.amount ??
-                room.offerRetailRate?.amount ??
-                room.offerInitialPrice?.amount ??
-                null;
+const roomRetailRate = Array.isArray(room.offerRetailRate)
+    ? room.offerRetailRate[0]
+    : room.offerRetailRate;
 
-            const currency =
-                retailRate.total?.[0]?.currency ??
-                room.offerRetailRate?.currency ??
-                room.offerInitialPrice?.currency ??
-                "EUR";
+const roomInitialPrice = Array.isArray(room.offerInitialPrice)
+    ? room.offerInitialPrice[0]
+    : room.offerInitialPrice;
+
+const price =
+    retailRate.total?.[0]?.amount ??
+    roomRetailRate?.amount ??
+    roomInitialPrice?.amount ??
+    null;
+
+const currency =
+    retailRate.total?.[0]?.currency ??
+    roomRetailRate?.currency ??
+    roomInitialPrice?.currency ??
+    "USD";
 
             const cancellationPolicies =
                 rate.cancellationPolicies ||
@@ -2672,6 +2735,30 @@ hotelOwner:
    // ========================================================
 // 🏆 CLASSEMENT DU CATALOGUE D'OFFRES
 // ========================================================
+console.log("========================================");
+console.log("📊 BILAN RECHERCHE TOURIZIA");
+console.log("========================================");
+
+console.log("🏨 HÔTELS REÇUS:", hotels.length);
+console.log("🛏️ TARIFS EXPLOITABLES:", offers.length);
+
+console.log(
+    "🆔 TARIFS AVEC OFFER ID:",
+    offers.filter(o => Boolean(o.offerId)).length
+);
+
+console.log(
+    "💰 TARIFS AVEC PRIX:",
+    offers.filter(o => o.price !== null).length
+);
+
+console.log(
+    "📍 TARIFS AVEC ADRESSE:",
+    offers.filter(o => Boolean(o.hotelAddress)).length
+);
+
+console.log("========================================");
+
 
 const rankedOffers = rankHotelOffers(offers);
 
@@ -4437,23 +4524,12 @@ const displayedOffers = offers.slice(
                     // 5️⃣ DÉTAILS HÔTEL
                     // =================================================
 
-                    let hotelDetails = {};
+                    
+// Les informations de base sont déjà fournies
+// dans result.hotels par la recherche LiteAPI.
+// On évite un appel HTTP supplémentaire par hôtel.
+const hotelDetails = {};
 
-                    try {
-
-                        hotelDetails =
-                            await getLiteApiHotelDetails(
-                                offer.hotelId
-                            );
-
-                    } catch (error) {
-
-                        console.warn(
-                            "⚠️ Détails hôtel indisponibles:",
-                            error.message
-                        );
-
-                    }
 
 
                     // =================================================
