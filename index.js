@@ -1477,6 +1477,89 @@ app.get(
 );
 
 // ============================================================
+// 💰 ADMIN — BILAN FINANCIER HÔTELS
+// ============================================================
+
+app.get("/api/admin/hotel-financials", requireAdmin, async (req, res) => {
+    try {
+        if (!hotelTransactions) {
+            return res.status(503).json({
+                success: false,
+                error: "MongoDB indisponible"
+            });
+        }
+
+        const transactions = await hotelTransactions.find({
+            type: "hotel",
+            status: "PAID",
+            "payment.status": "PAID",
+            "payment.amount": { $gt: 0 }
+        }).toArray();
+
+        const currencies = {};
+        const methods = {
+            stripe: {},
+            wave: {},
+            orangeMoney: {},
+            other: {}
+        };
+
+        const normalizeMethod = (method) => {
+            const value = String(method || "").trim().toLowerCase();
+
+            if (value === "stripe") return "stripe";
+            if (value === "wave") return "wave";
+            if (value.includes("orange")) return "orangeMoney";
+
+            return "other";
+        };
+
+        for (const transaction of transactions) {
+            const amount = Number(transaction.payment?.amount || 0);
+            const currency = String(
+                transaction.payment?.currency || "UNKNOWN"
+            ).toUpperCase();
+
+            const method = normalizeMethod(
+                transaction.payment?.method
+            );
+
+            if (!Number.isFinite(amount) || amount <= 0) continue;
+
+            currencies[currency] =
+                (currencies[currency] || 0) + amount;
+
+            methods[method][currency] =
+                (methods[method][currency] || 0) + amount;
+        }
+
+        const result = {
+            paidReservations: transactions.length,
+            currencies,
+            methods
+        };
+
+        console.log("💰 HOTEL FINANCIALS:", result);
+
+        res.set("Cache-Control", "no-store");
+
+        return res.json({
+            success: true,
+            ...result
+        });
+
+    } catch (error) {
+        console.error("❌ HOTEL FINANCIALS ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            error: "Impossible de récupérer le bilan financier hôtel"
+        });
+    }
+});
+
+
+// ============================================================
 // 🏨 STATUT TRANSACTION HÔTEL
 // ============================================================
 
