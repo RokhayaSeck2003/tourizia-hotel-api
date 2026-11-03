@@ -1726,9 +1726,33 @@ async function resolveLiteApiCity(cityName, countryCode) {
 
     const liteApiCities = await getLiteApiCities(countryCode);
 
+    console.log("🔎 CITY REQUESTED :", cityName);
+console.log("🔎 CITY NORMALIZED :", requestedCity);
+console.log(
+    "🔎 LITEAPI BRUXELLES :",
+    liteApiCities.filter(city =>
+        city.toLowerCase().includes("brux")
+    )
+);
+
     const officialCity = liteApiCities.find(city =>
-        normalizeDestinationText(city) === requestedCity
+    normalizeDestinationText(city) === requestedCity
+);
+
+if (!officialCity) {
+    console.error("❌ VILLE INTROUVABLE DANS LITEAPI :", {
+        requestedCity,
+        countryCode,
+        sampleMatches: liteApiCities.filter(city =>
+            normalizeDestinationText(city).includes(requestedCity) ||
+            requestedCity.includes(normalizeDestinationText(city))
+        ).slice(0, 10)
+    });
+
+    throw new Error(
+        `La ville "${cityName}" n'est pas référencée dans LiteAPI pour ${countryCode}.`
     );
+}
 
     if (!officialCity) {
         throw new Error(
