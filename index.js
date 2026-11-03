@@ -3114,106 +3114,151 @@ if (!Array.isArray(result.offers) || result.offers.length === 0) {
         transactionId
     );
 
-    // Préparer les données pour l'email administrateur.
-    const manualNotificationData = {
+    // ============================================================
+// INFORMATIONS COMMUNES : POPUP CLIENT + EMAILS
+// ============================================================
+
+const requestDetails = {
+    transactionId,
+
+    fullName: transaction.customer?.fullName || "",
+    email: transaction.customer?.email || "",
+    phone: transaction.customer?.phone || "",
+
+    city: searchData.city || "",
+    countryCode: searchData.countryCode || "",
+
+    checkIn: searchData.checkIn || "",
+    checkOut: searchData.checkOut || "",
+
+    adults: Number(searchData.adults || 0),
+    children: Number(searchData.children || 0),
+    rooms: Number(searchData.rooms || 1),
+
+    guestNationality: searchData.guestNationality || "SN",
+
+    guests: Array.isArray(transaction.request?.guests)
+        ? transaction.request.guests
+        : []
+};
+
+// ============================================================
+// EMAIL ADMINISTRATEUR
+// ============================================================
+
+const manualNotificationData = {
+    ...requestDetails,
+
+    paymentId:
+        transaction.payment?.paymentId ||
+        transaction.payment?.stripeSessionId ||
+        transaction.payment?.paytechReference ||
         transactionId,
 
-        paymentId:
-            transaction.payment?.paymentId ||
-            transaction.payment?.stripeSessionId ||
-            transaction.payment?.paytechReference ||
-            transactionId,
+    paymentMethod:
+        transaction.payment?.method || "",
 
-        paymentMethod:
-            transaction.payment?.method || "",
+    paytechReference:
+        transaction.payment?.paytechReference || "",
 
-        paytechReference:
-            transaction.payment?.paytechReference || "",
+    paytechAmount:
+        transaction.payment?.amount || 0,
 
-        paytechAmount:
-            transaction.payment?.amount || 0,
+    hotelName: "",
+    roomName: ""
+};
 
-        fullName:
-            transaction.customer?.fullName || "",
+let adminNotificationStatus = "FAILED";
 
-        email:
-            transaction.customer?.email || "",
+try {
 
-        phone:
-            transaction.customer?.phone || "",
-
-        city: searchData.city,
-        countryCode: searchData.countryCode,
-        checkIn: searchData.checkIn,
-        checkOut: searchData.checkOut,
-        adults: searchData.adults,
-        children: searchData.children,
-        rooms: searchData.rooms,
-        guestNationality: searchData.guestNationality,
-
-        guests:
-            Array.isArray(transaction.request?.guests)
-                ? transaction.request.guests
-                : [],
-
-        hotelName: "",
-        roomName: ""
-    };
-
-    // Notification administrateur.
-    // Une erreur d'email ne doit jamais annuler le dossier manuel.
-    let notificationStatus = "FAILED";
-
-    try {
-
-        const emailResult = await sendHotelManualSearchNotification(
+    const adminEmailResult =
+        await sendHotelManualSearchNotification(
             manualNotificationData,
             "Aucune offre LiteAPI disponible pour la destination et les dates demandées."
         );
 
-        if (emailResult) {
-            notificationStatus = "SENT";
-        }
-
-    } catch (emailError) {
-
-        console.error(
-            "❌ EMAIL RECHERCHE MANUELLE NON ENVOYÉ:",
-            emailError
-        );
-
+    if (adminEmailResult) {
+        adminNotificationStatus = "SENT";
     }
 
-    await hotelTransactions.updateOne(
-        {
-            transactionId,
-            type: "hotel",
-            status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED
-        },
-        {
-            $set: {
-                "manualSearch.notificationStatus": notificationStatus,
-                "manualSearch.notificationUpdatedAt": new Date()
-            }
-        }
-    );
+} catch (emailError) {
 
-    console.log(
-        "📧 NOTIFICATION ADMIN:",
-        notificationStatus,
-        "|",
-        transactionId
+    console.error(
+        "❌ EMAIL ADMIN RECHERCHE MANUELLE:",
+        emailError
     );
+}
 
-    return res.status(200).json({
-        success: true,
-        available: false,
-        manualSearchRequired: true,
-        retryAllowed: false,
-        status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+// ============================================================
+// EMAIL CLIENT
+// ============================================================
+
+let customerNotificationStatus = "FAILED";
+
+try {
+
+    const customerEmailResult =
+        await sendHotelManualSearchCustomerEmail(requestDetails);
+
+    if (customerEmailResult) {
+        customerNotificationStatus = "SENT";
+    }
+
+} catch (emailError) {
+
+    console.error(
+        "❌ EMAIL CLIENT RECHERCHE MANUELLE:",
+        emailError
+    );
+}
+
+// Enregistrer les résultats des notifications.
+await hotelTransactions.updateOne(
+    {
         transactionId,
-        message: "Votre demande est prise en charge par l'équipe Tourizia."
-    });
+        type: "hotel",
+        status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED
+    },
+    {
+        $set: {
+            "manualSearch.notificationStatus": adminNotificationStatus,
+            "manualSearch.notificationUpdatedAt": new Date(),
+            "manualSearch.customerNotificationStatus": customerNotificationStatus,
+            "manualSearch.customerNotificationUpdatedAt": new Date()
+        }
+    }
+);
+
+console.log("📧 NOTIFICATION ADMIN:", adminNotificationStatus);
+console.log("📧 NOTIFICATION CLIENT:", customerNotificationStatus);
+
+// ============================================================
+// RÉPONSE AU FRONTEND : DONNÉES POUR LA POPUP PREMIUM
+// ============================================================
+
+return res.status(200).json({
+    success: true,
+    available: false,
+    manualSearchRequired: true,
+    retryAllowed: false,
+
+    status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+
+    transactionId,
+
+    message: "Votre demande est prise en charge par l'équipe Tourizia.",
+
+    requestDetails: {
+        ...requestDetails,
+
+        checkInFormatted: formatHotelDate(requestDetails.checkIn),
+        checkOutFormatted: formatHotelDate(requestDetails.checkOut)
+    },
+
+    redirectUrl: "https://tourizia.com/"
+});
+
 }
 
         // 7. Enregistrer le catalogue privé
@@ -7192,6 +7237,142 @@ async function sendHotelManualSearchNotification(
 
     }
 
+}
+
+// ============================================================
+// 📧 EMAIL CLIENT — DEMANDE HÔTEL EN RECHERCHE MANUELLE
+// ============================================================
+
+async function sendHotelManualSearchCustomerEmail(data) {
+
+    if (!resend) {
+        console.error("❌ RESEND NON CONFIGURÉ");
+        return null;
+    }
+
+    if (!data.email) {
+        console.error("❌ EMAIL CLIENT MANQUANT");
+        return null;
+    }
+
+    const guestsHtml =
+        Array.isArray(data.guests) && data.guests.length
+            ? data.guests.map((guest, index) => `
+                <div style="padding:8px 0;border-bottom:1px solid #e5eaf0;">
+                    ${index + 1}. ${escapeHtml(
+                        `${guest.firstName || ""} ${guest.lastName || ""}`.trim()
+                    )}
+                    — ${escapeHtml(guest.type || "Voyageur")}
+                </div>
+            `).join("")
+            : `<p>Voyageurs : ${Number(data.adults || 0) + Number(data.children || 0)}</p>`;
+
+    const html = `
+    <div style="background:#f3f6fa;padding:30px 12px;font-family:Arial,sans-serif;color:#17263d;">
+        <div style="max-width:620px;margin:auto;background:#101e2c;border-radius:20px;padding:30px;color:#fff;">
+
+            <div style="text-align:center;">
+                <div style="display:inline-block;background:#174b45;color:#70d8b6;padding:15px;border-radius:50%;font-size:25px;">
+                    ✓
+                </div>
+
+                <h2 style="font-size:23px;margin:18px 0 8px;">
+                    Votre demande est prise en charge !
+                </h2>
+
+                <div style="display:inline-block;background:#153d37;color:#37d99a;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:bold;">
+                    SERVICE CLIENT TOURIZIA
+                </div>
+            </div>
+
+            <h3 style="text-align:center;margin-top:28px;">
+                Nous recherchons votre hébergement.
+            </h3>
+
+            <p style="color:#cbd5e1;text-align:center;line-height:1.7;">
+                Votre paiement a bien été reçu. Notre équipe prend le relais
+                pour rechercher un hébergement correspondant à votre demande.
+            </p>
+
+            <div style="background:#203649;border-radius:13px;padding:18px;margin-top:22px;">
+                <h3 style="margin-top:0;color:#70d8b6;">Votre demande de séjour</h3>
+
+                <p><strong>Destination :</strong> ${escapeHtml(data.city)}, ${escapeHtml(data.countryCode)}</p>
+
+                <p><strong>Arrivée :</strong> ${escapeHtml(formatHotelDate(data.checkIn))}</p>
+
+                <p><strong>Départ :</strong> ${escapeHtml(formatHotelDate(data.checkOut))}</p>
+
+                <p><strong>Adultes :</strong> ${Number(data.adults || 0)}</p>
+
+                <p><strong>Enfants :</strong> ${Number(data.children || 0)}</p>
+
+                <p><strong>Chambres :</strong> ${Number(data.rooms || 1)}</p>
+
+                <p><strong>Nationalité :</strong> ${escapeHtml(data.guestNationality || "")}</p>
+
+                <div style="margin-top:15px;">
+                    <strong>Voyageurs :</strong>
+                    ${guestsHtml}
+                </div>
+            </div>
+
+            <div style="background:#17443f;border-radius:13px;padding:18px;margin-top:18px;">
+                <strong style="color:#8ce3c4;">
+                    Délai de retour visé : 1 à 2 heures
+                </strong>
+
+                <p style="color:#d1e5df;line-height:1.6;margin-bottom:0;">
+                    Notre équipe vous contactera par email ou téléphone
+                    dès qu'un résultat correspondant à votre demande sera disponible.
+                </p>
+            </div>
+
+            <p style="text-align:center;font-weight:bold;line-height:1.6;margin-top:22px;">
+                Votre demande est enregistrée. Merci de votre confiance !
+            </p>
+
+            <p style="text-align:center;color:#aebdca;font-size:12px;margin-top:25px;">
+                Référence de demande : ${escapeHtml(data.transactionId)}
+            </p>
+
+            <p style="text-align:center;color:#94a3b8;font-size:11px;">
+                Le délai annoncé est un objectif de traitement, pas une confirmation de réservation.
+            </p>
+
+        </div>
+    </div>
+    `;
+
+    try {
+
+        const result = await resend.emails.send({
+            from: "Tourizia <tickets@tourizia.com>",
+            to: data.email,
+            subject: "Tourizia — Votre demande d'hébergement est prise en charge",
+            html
+        });
+
+        if (result.error) {
+            throw new Error(result.error.message || "Erreur Resend");
+        }
+
+        console.log(
+            "📧 EMAIL CLIENT RECHERCHE MANUELLE ENVOYÉ:",
+            data.email
+        );
+
+        return result;
+
+    } catch (error) {
+
+        console.error(
+            "❌ ERREUR EMAIL CLIENT TOURIZIA:",
+            error
+        );
+
+        return null;
+    }
 }
 // ============================================================
 
