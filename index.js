@@ -2970,6 +2970,22 @@ app.post("/api/search-hotels", async (req, res) => {
                 error: "Transaction introuvable"
             });
         }
+        // Dossier déjà transmis à la recherche manuelle.
+// On renvoie son état sans renvoyer un deuxième email.
+if (
+    transaction.status ===
+    HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED
+) {
+    return res.status(200).json({
+        success: true,
+        available: false,
+        manualSearchRequired: true,
+        retryAllowed: false,
+        status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+        transactionId,
+        message: "Votre demande est prise en charge par l'équipe Tourizia."
+    });
+}
 
         // 2. Vérifier le statut
         if (transaction.status === HOTEL_TRANSACTION_STATUS.SEARCHING) {
@@ -3039,41 +3055,166 @@ app.post("/api/search-hotels", async (req, res) => {
         // 5. Recherche LiteAPI
         const result = await searchHotelOffers(searchData);
 
-        // 6. Aucune offre : libérer le verrou et autoriser un retry
-        if (!result.offers || result.offers.length === 0) {
+       // ============================================================
+// 6. AUCUNE OFFRE LITEAPI → RECHERCHE MANUELLE TOURIZIA
+// ============================================================
 
-            const resetTime = new Date();
+if (!Array.isArray(result.offers) || result.offers.length === 0) {
 
-            await hotelTransactions.updateOne(
-                {
-                    transactionId,
-                    type: "hotel",
-                    status: HOTEL_TRANSACTION_STATUS.SEARCHING
-                },
-                {
-                    $set: {
-                        status: HOTEL_TRANSACTION_STATUS.PAID,
-                        updatedAt: resetTime,
-                        error: null
-                    },
-                    $push: {
-                        history: {
-                            status: HOTEL_TRANSACTION_STATUS.PAID,
-                            at: resetTime
-                        }
-                    }
+    const manualTime = new Date();
+
+    // Transition atomique : SEARCHING → MANUAL_SEARCH_REQUIRED
+    // Une seule requête pourra déclencher l'email administrateur.
+    const manualUpdate = await hotelTransactions.updateOne(
+        {
+            transactionId,
+            type: "hotel",
+            status: HOTEL_TRANSACTION_STATUS.SEARCHING
+        },
+        {
+            $set: {
+                status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+                updatedAt: manualTime,
+                error: null,
+
+                manualSearch: {
+                    required: true,
+                    reason: "Aucune offre LiteAPI disponible pour les critères demandés.",
+                    requestedAt: manualTime,
+                    notificationStatus: "PENDING"
                 }
-            );
-
-            searchClaimed = false;
-
-            return res.status(200).json({
-                success: true,
-                available: false,
-                retryAllowed: true,
-                message: "Aucune offre disponible. Vous pouvez réessayer."
-            });
+            },
+            $push: {
+                history: {
+                    status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+                    at: manualTime
+                }
+            }
         }
+    );
+
+    searchClaimed = false;
+
+    // Si la transition n'a pas été effectuée, ne pas envoyer de doublon.
+    if (manualUpdate.modifiedCount !== 1) {
+
+        console.warn(
+            "⚠️ RECHERCHE MANUELLE : transition déjà effectuée",
+            transactionId
+        );
+
+        return res.status(409).json({
+            success: false,
+            error: "Le dossier a déjà été traité ou son statut a changé."
+        });
+    }
+
+    console.log(
+        "📌 DOSSIER TRANSMIS À LA RECHERCHE MANUELLE TOURIZIA:",
+        transactionId
+    );
+
+    // Préparer les données pour l'email administrateur.
+    const manualNotificationData = {
+        transactionId,
+
+        paymentId:
+            transaction.payment?.paymentId ||
+            transaction.payment?.stripeSessionId ||
+            transaction.payment?.paytechReference ||
+            transactionId,
+
+        paymentMethod:
+            transaction.payment?.method || "",
+
+        paytechReference:
+            transaction.payment?.paytechReference || "",
+
+        paytechAmount:
+            transaction.payment?.amount || 0,
+
+        fullName:
+            transaction.customer?.fullName || "",
+
+        email:
+            transaction.customer?.email || "",
+
+        phone:
+            transaction.customer?.phone || "",
+
+        city: searchData.city,
+        countryCode: searchData.countryCode,
+        checkIn: searchData.checkIn,
+        checkOut: searchData.checkOut,
+        adults: searchData.adults,
+        children: searchData.children,
+        rooms: searchData.rooms,
+        guestNationality: searchData.guestNationality,
+
+        guests:
+            Array.isArray(transaction.request?.guests)
+                ? transaction.request.guests
+                : [],
+
+        hotelName: "",
+        roomName: ""
+    };
+
+    // Notification administrateur.
+    // Une erreur d'email ne doit jamais annuler le dossier manuel.
+    let notificationStatus = "FAILED";
+
+    try {
+
+        const emailResult = await sendHotelManualSearchNotification(
+            manualNotificationData,
+            "Aucune offre LiteAPI disponible pour la destination et les dates demandées."
+        );
+
+        if (emailResult) {
+            notificationStatus = "SENT";
+        }
+
+    } catch (emailError) {
+
+        console.error(
+            "❌ EMAIL RECHERCHE MANUELLE NON ENVOYÉ:",
+            emailError
+        );
+
+    }
+
+    await hotelTransactions.updateOne(
+        {
+            transactionId,
+            type: "hotel",
+            status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED
+        },
+        {
+            $set: {
+                "manualSearch.notificationStatus": notificationStatus,
+                "manualSearch.notificationUpdatedAt": new Date()
+            }
+        }
+    );
+
+    console.log(
+        "📧 NOTIFICATION ADMIN:",
+        notificationStatus,
+        "|",
+        transactionId
+    );
+
+    return res.status(200).json({
+        success: true,
+        available: false,
+        manualSearchRequired: true,
+        retryAllowed: false,
+        status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+        transactionId,
+        message: "Votre demande est prise en charge par l'équipe Tourizia."
+    });
+}
 
         // 7. Enregistrer le catalogue privé
         const catalogue = await createHotelOfferCatalogue(
@@ -10328,15 +10469,16 @@ app.get("/api/hotel-destinations", async (req, res) => {
             }
 
             const destination = {
-                name: String(place.name).trim(),
-                country: String(place.countryName || "").trim(),
-                countryCode: String(place.countryCode).toUpperCase(),
-                region: String(place.adminName1 || "").trim(),
-                latitude: Number(place.lat),
-                longitude: Number(place.lng),
-                featureCode: String(place.fcode || ""),
-                geonameId: place.geonameId || null
-            };
+    name: String(place.name).trim(),
+    country: String(place.countryName || "").trim(),
+    countryCode: String(place.countryCode).toUpperCase(),
+    region: String(place.adminName1 || "").trim(),
+    latitude: Number(place.lat),
+    longitude: Number(place.lng),
+    featureCode: String(place.fcode || ""),
+    geonameId: place.geonameId || null,
+    population: Number(place.population || 0)
+};
 
             const normalizedName = normalizeDestinationText(
                 destination.name
@@ -10361,6 +10503,65 @@ app.get("/api/hotel-destinations", async (req, res) => {
                 unique.set(key, destination);
             }
         }
+
+        // ============================================================
+// 🌍 FILTRE DES DESTINATIONS UTILES TOURIZIA
+// ============================================================
+
+const countryCode = String(
+    records[0]?.countryCode || ""
+).toUpperCase();
+
+const liteApiCities = await getLiteApiCities(countryCode);
+
+const liteApiCityNames = new Set(
+    liteApiCities.map(normalizeDestinationText)
+);
+
+// Exceptions touristiques à conserver même avec une
+// population faible, sous réserve de présence dans LiteAPI.
+const priorityDestinations = {
+    SN: [
+        "dakar",
+        "saly",
+        "saly portudal",
+        "mbour",
+        "somone",
+        "saint-louis",
+        "st louis",
+        "thiès",
+        "ziguinchor",
+        "cap skirring",
+        "kaolack",
+        "tambacounda",
+        "touba"
+    ]
+};
+
+const priorityCities = new Set(
+    (priorityDestinations[countryCode] || [])
+        .map(normalizeDestinationText)
+);
+
+for (const [key, place] of unique.entries()) {
+
+    const cityName = normalizeDestinationText(place.name);
+
+    const existsInLiteAPI = liteApiCityNames.has(cityName);
+
+    const isCapital = place.featureCode === "PPLC";
+
+    const isMajorCity = place.population >= 20000;
+
+    const isTouristDestination = priorityCities.has(cityName);
+
+    if (
+        !existsInLiteAPI ||
+        (!isCapital && !isMajorCity && !isTouristDestination)
+    ) {
+        unique.delete(key);
+    }
+}
 
         const destinations = Array.from(unique.values());
 
