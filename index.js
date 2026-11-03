@@ -1645,6 +1645,120 @@ const liteApiHeaders = {
 };
 
 // ============================================================
+// 🌍 TOURIZIA — VILLES OFFICIELLES LITEAPI
+// ============================================================
+
+const liteApiCitiesCache = new Map();
+
+async function getLiteApiCities(countryCode) {
+
+    const code = String(countryCode || "")
+        .trim()
+        .toUpperCase();
+
+    if (!/^[A-Z]{2}$/.test(code)) {
+        throw new Error("Code pays ISO invalide");
+    }
+
+    // Cache de 24 heures pour éviter les appels répétés.
+    const cached = liteApiCitiesCache.get(code);
+
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.cities;
+    }
+
+    const url = new URL(
+        `${LITEAPI_BASE_URL}/data/cities`
+    );
+
+    url.searchParams.set("countryCode", code);
+
+    const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: liteApiHeaders
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+        console.error(
+            "❌ LITEAPI CITIES ERROR:",
+            response.status,
+            result
+        );
+
+        throw new Error(
+            "Impossible de récupérer les villes LiteAPI"
+        );
+    }
+
+    const cities = [
+        ...new Set(
+            (Array.isArray(result.data) ? result.data : [])
+                .map(item => String(item.city || "").trim())
+                .filter(Boolean)
+        )
+    ].sort((a, b) => a.localeCompare(b));
+
+    liteApiCitiesCache.set(code, {
+        cities,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000
+    });
+
+    console.log(
+        `🌍 VILLES LITEAPI ${code}:`,
+        cities.length
+    );
+
+    return cities;
+}
+
+
+// ============================================================
+// 🔎 ENDPOINT TOURIZIA — LISTE DES VILLES LITEAPI
+// ============================================================
+
+app.get("/api/liteapi-cities", async (req, res) => {
+
+    try {
+
+        const countryCode = String(
+            req.query.countryCode || ""
+        ).trim().toUpperCase();
+
+        if (!/^[A-Z]{2}$/.test(countryCode)) {
+            return res.status(400).json({
+                success: false,
+                error: "countryCode ISO-2 obligatoire"
+            });
+        }
+
+        const cities = await getLiteApiCities(countryCode);
+
+        return res.json({
+            success: true,
+            provider: "LiteAPI",
+            countryCode,
+            total: cities.length,
+            cities
+        });
+
+    } catch (error) {
+
+        console.error(
+            "❌ TOURIZIA CITIES ERROR:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+
+// ============================================================
 // ROOT
 // ============================================================
 
@@ -2616,12 +2730,17 @@ const currency =
                 null;
 
             offers.push({
-                hotelId,
+    hotelId,
 
-                hotelName:
-                    hotelData.name ||
-                    hotel.name ||
-                    "",
+    // Identifiants LiteAPI conservés côté serveur
+    offerId,
+    rateId: rate.rateId || null,
+    roomTypeId: room.roomTypeId || null,
+
+    hotelName:
+        hotelData.name ||
+        hotel.name ||
+        "",
                     hotelImage:
     hotelData.main_photo ||
     hotelData.mainPhoto ||
@@ -2690,13 +2809,6 @@ hotelOwner:
     hotelDetails.ownerName ||
     hotelData.ownerName ||
     "",
-
-                hotelOwner:
-                    hotelData.owner?.name ||
-                    hotelData.owner?.fullName ||
-                    hotelData.ownerName ||
-                    hotelData.propertyOwner ||
-                    "",
 
                 offerId,
 
