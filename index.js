@@ -1735,51 +1735,144 @@ async function resolveLiteApiCity(cityName, countryCode) {
         .trim()
         .toUpperCase();
 
-    if (!requestedCity || !code) {
-        throw new Error("Ville ou code pays manquant.");
+    if (!requestedCity || !/^[A-Z]{2}$/.test(code)) {
+        throw new Error("Ville ou code pays invalide.");
     }
 
-    // Première recherche dans le cache ou auprès de LiteAPI.
+    // 1. Essayer d'abord le catalogue classique LiteAPI.
     let liteApiCities = await getLiteApiCities(code);
 
     let officialCity = liteApiCities.find(city =>
         normalizeDestinationText(city) === requestedCity
     );
 
-    // Si la ville est absente, supprimer le cache et recharger.
-    if (!officialCity) {
-        console.warn("♻️ VILLE ABSENTE DU CACHE — ACTUALISATION :", {
-            cityName,
-            requestedCity,
-            countryCode: code
-        });
+    if (officialCity) {
+        console.log("✅ VILLE OFFICIELLE LITEAPI :", officialCity);
 
-        liteApiCitiesCache.delete(code);
-
-        liteApiCities = await getLiteApiCities(code);
-
-        console.log("🔬 APRÈS ACTUALISATION :", {
-            countryCode: code,
-            total: liteApiCities.length,
-            bruxellesMatches: liteApiCities.filter(city =>
-                normalizeDestinationText(city).includes("brux")
-            )
-        });
-
-        officialCity = liteApiCities.find(city =>
-            normalizeDestinationText(city) === requestedCity
-        );
+        return {
+            cityName: officialCity,
+            placeId: null,
+            displayName: officialCity,
+            formattedAddress: null
+        };
     }
 
-    if (!officialCity) {
+    // 2. Si la ville n'existe pas dans /data/cities,
+    //    utiliser le moteur officiel LiteAPI Places.
+    const countryName = new Intl.DisplayNames(
+        ["fr"],
+        { type: "region" }
+    ).of(code);
+
+    const searchText = `${cityName}, ${countryName || code}`;
+
+    const placesUrl = new URL(
+        `${LITEAPI_BASE_URL}/data/places`
+    );
+
+    placesUrl.searchParams.set("textQuery", searchText);
+    placesUrl.searchParams.set("type", "locality");
+    placesUrl.searchParams.set("language", "fr");
+
+    console.log("🔎 LITEAPI PLACES REQUEST :", {
+        cityName,
+        countryCode: code,
+        countryName,
+        searchText
+    });
+
+    const placesResponse = await fetch(
+        placesUrl.toString(),
+        {
+            method: "GET",
+            headers: liteApiHeaders
+        }
+    );
+
+    const placesResult = await placesResponse.json();
+
+    if (!placesResponse.ok) {
+        console.error(
+            "❌ LITEAPI PLACES ERROR :",
+            placesResponse.status,
+            placesResult
+        );
+
         throw new Error(
-            `La ville "${cityName}" n'est pas référencée dans LiteAPI pour ${code}.`
+            `Impossible de retrouver la ville "${cityName}" avec LiteAPI Places.`
         );
     }
 
-    console.log("✅ VILLE OFFICIELLE LITEAPI :", officialCity);
+    const places = Array.isArray(placesResult.data)
+        ? placesResult.data
+        : [];
 
-    return officialCity;
+    console.log(
+        "🔎 LITEAPI PLACES RESULTS :",
+        places.map(place => ({
+            placeId: place.placeId,
+            displayName: place.displayName,
+            formattedAddress: place.formattedAddress,
+            types: place.types
+        }))
+    );
+
+    // Ne retenir qu'une ville (locality) située dans le pays demandé.
+    const matchingPlace = places.find(place => {
+        const types = Array.isArray(place.types)
+            ? place.types
+            : [];
+
+        const address = normalizeDestinationText(
+            place.formattedAddress || ""
+        );
+
+        const localizedCountry = normalizeDestinationText(
+            countryName || ""
+        );
+
+        const hasLocalityType = types.includes("locality");
+
+        const hasCountryMatch =
+            localizedCountry &&
+            address.includes(localizedCountry);
+
+        return (
+            place.placeId &&
+            hasLocalityType &&
+            hasCountryMatch
+        );
+    });
+
+    if (!matchingPlace) {
+        console.error(
+            "❌ AUCUNE VILLE LITEAPI PLACES CORRESPONDANTE :",
+            {
+                cityName,
+                countryCode: code,
+                countryName,
+                places
+            }
+        );
+
+        throw new Error(
+            `LiteAPI Places n'a pas retourné de ville vérifiable pour "${cityName}" (${code}).`
+        );
+    }
+
+    console.log("✅ LITEAPI PLACE ID RESOLVED :", {
+        cityName,
+        displayName: matchingPlace.displayName,
+        formattedAddress: matchingPlace.formattedAddress,
+        placeId: matchingPlace.placeId
+    });
+
+    return {
+        cityName: null,
+        placeId: matchingPlace.placeId,
+        displayName: matchingPlace.displayName,
+        formattedAddress: matchingPlace.formattedAddress
+    };
 }
 
 
@@ -2577,21 +2670,36 @@ if (data.hotelId) {
 
 } else {
 
-    // Résoudre le nom GeoNames avec le catalogue officiel LiteAPI
-    const officialCity = await resolveLiteApiCity(
+    const cityLocation = await resolveLiteApiCity(
         data.city,
         data.countryCode
     );
 
-    requestBody.cityName = officialCity;
-    requestBody.countryCode = data.countryCode;
+    if (cityLocation.placeId) {
 
-    console.log("📍 RECHERCHE HÔTEL PAR VILLE:", {
-        cityGeoNames: data.city,
-        cityLiteAPI: officialCity,
-        countryCode: data.countryCode
-    });
+        // Ville retrouvée avec LiteAPI Places.
+        requestBody.placeId = cityLocation.placeId;
 
+        console.log("📍 RECHERCHE HÔTEL PAR PLACE ID :", {
+            cityDemandee: data.city,
+            villeLiteAPI: cityLocation.displayName,
+            adresse: cityLocation.formattedAddress,
+            placeId: cityLocation.placeId,
+            countryCode: data.countryCode
+        });
+
+    } else {
+
+        // Ville trouvée dans le catalogue classique LiteAPI.
+        requestBody.cityName = cityLocation.cityName;
+        requestBody.countryCode = data.countryCode;
+
+        console.log("📍 RECHERCHE HÔTEL PAR VILLE :", {
+            cityGeoNames: data.city,
+            cityLiteAPI: cityLocation.cityName,
+            countryCode: data.countryCode
+        });
+    }
 }
 
     console.log(
