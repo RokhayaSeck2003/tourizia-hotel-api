@@ -1700,6 +1700,17 @@ async function getLiteApiCities(countryCode) {
         )
     ].sort((a, b) => a.localeCompare(b));
 
+    console.log("🔬 LITEAPI CITY DIAGNOSTIC:", {
+    countryCode: code,
+    total: cities.length,
+    hasBruxelles: cities.some(
+        city => normalizeDestinationText(city) === "bruxelles"
+    ),
+    bruxellesMatches: cities.filter(
+        city => normalizeDestinationText(city).includes("brux")
+    )
+});
+
     liteApiCitiesCache.set(code, {
         cities,
         expiresAt: Date.now() + 24 * 60 * 60 * 1000
