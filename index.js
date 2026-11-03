@@ -10685,64 +10685,6 @@ app.get("/api/hotel-destinations", async (req, res) => {
             }
         }
 
-        // ============================================================
-// 🌍 FILTRE DES DESTINATIONS UTILES TOURIZIA
-// ============================================================
-
-const countryCode = String(
-    records[0]?.countryCode || ""
-).toUpperCase();
-
-const liteApiCities = await getLiteApiCities(countryCode);
-
-const liteApiCityNames = new Set(
-    liteApiCities.map(normalizeDestinationText)
-);
-
-// Exceptions touristiques à conserver même avec une
-// population faible, sous réserve de présence dans LiteAPI.
-const priorityDestinations = {
-    SN: [
-        "dakar",
-        "saly",
-        "saly portudal",
-        "mbour",
-        "somone",
-        "saint-louis",
-        "st louis",
-        "thiès",
-        "ziguinchor",
-        "cap skirring",
-        "kaolack",
-        "tambacounda",
-        "touba"
-    ]
-};
-
-const priorityCities = new Set(
-    (priorityDestinations[countryCode] || [])
-        .map(normalizeDestinationText)
-);
-
-for (const [key, place] of unique.entries()) {
-
-    const cityName = normalizeDestinationText(place.name);
-
-    const existsInLiteAPI = liteApiCityNames.has(cityName);
-
-    const isCapital = place.featureCode === "PPLC";
-
-    const isMajorCity = place.population >= 20000;
-
-    const isTouristDestination = priorityCities.has(cityName);
-
-    if (
-        !existsInLiteAPI ||
-        (!isCapital && !isMajorCity && !isTouristDestination)
-    ) {
-        unique.delete(key);
-    }
-}
 
         const destinations = Array.from(unique.values());
 
