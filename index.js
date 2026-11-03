@@ -3540,6 +3540,14 @@ return res.status(200).json({
 
 app.post("/api/select-hotel-offer", async (req, res) => {
 
+    console.log("🟢 TOURIZIA — REQUÊTE DE SÉLECTION REÇUE");
+
+    console.log("📥 DONNÉES DE SÉLECTION:", {
+        transactionId: req.body?.transactionId || null,
+        catalogueTokenPresent: !!req.body?.catalogueToken,
+        selectionId: req.body?.selectionId || null
+    });
+
     try {
 
         const {
