@@ -1727,47 +1727,53 @@ async function getLiteApiCities(countryCode) {
 // 🔎 CORRESPONDANCE GEO NAMES → VILLE OFFICIELLE LITEAPI
 // ============================================================
 
-async function resolveLiteApiCity(cityName, countryCode) {
 
+async function resolveLiteApiCity(cityName, countryCode) {
     const requestedCity = normalizeDestinationText(cityName);
 
-    if (!requestedCity || !countryCode) {
+    const code = String(countryCode || "")
+        .trim()
+        .toUpperCase();
+
+    if (!requestedCity || !code) {
         throw new Error("Ville ou code pays manquant.");
     }
 
-    const liteApiCities = await getLiteApiCities(countryCode);
+    // Première recherche dans le cache ou auprès de LiteAPI.
+    let liteApiCities = await getLiteApiCities(code);
 
-    console.log("🔎 CITY REQUESTED :", cityName);
-console.log("🔎 CITY NORMALIZED :", requestedCity);
-console.log(
-    "🔎 LITEAPI BRUXELLES :",
-    liteApiCities.filter(city =>
-        city.toLowerCase().includes("brux")
-    )
-);
-
-    const officialCity = liteApiCities.find(city =>
-    normalizeDestinationText(city) === requestedCity
-);
-
-if (!officialCity) {
-    console.error("❌ VILLE INTROUVABLE DANS LITEAPI :", {
-        requestedCity,
-        countryCode,
-        sampleMatches: liteApiCities.filter(city =>
-            normalizeDestinationText(city).includes(requestedCity) ||
-            requestedCity.includes(normalizeDestinationText(city))
-        ).slice(0, 10)
-    });
-
-    throw new Error(
-        `La ville "${cityName}" n'est pas référencée dans LiteAPI pour ${countryCode}.`
+    let officialCity = liteApiCities.find(city =>
+        normalizeDestinationText(city) === requestedCity
     );
-}
+
+    // Si la ville est absente, supprimer le cache et recharger.
+    if (!officialCity) {
+        console.warn("♻️ VILLE ABSENTE DU CACHE — ACTUALISATION :", {
+            cityName,
+            requestedCity,
+            countryCode: code
+        });
+
+        liteApiCitiesCache.delete(code);
+
+        liteApiCities = await getLiteApiCities(code);
+
+        console.log("🔬 APRÈS ACTUALISATION :", {
+            countryCode: code,
+            total: liteApiCities.length,
+            bruxellesMatches: liteApiCities.filter(city =>
+                normalizeDestinationText(city).includes("brux")
+            )
+        });
+
+        officialCity = liteApiCities.find(city =>
+            normalizeDestinationText(city) === requestedCity
+        );
+    }
 
     if (!officialCity) {
         throw new Error(
-            `La ville "${cityName}" n'est pas référencée dans LiteAPI pour ${countryCode}.`
+            `La ville "${cityName}" n'est pas référencée dans LiteAPI pour ${code}.`
         );
     }
 
@@ -1775,6 +1781,7 @@ if (!officialCity) {
 
     return officialCity;
 }
+
 
 // ============================================================
 // 🔎 ENDPOINT TOURIZIA — LISTE DES VILLES LITEAPI
