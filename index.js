@@ -1712,7 +1712,34 @@ async function getLiteApiCities(countryCode) {
 
     return cities;
 }
+// ============================================================
+// 🔎 CORRESPONDANCE GEO NAMES → VILLE OFFICIELLE LITEAPI
+// ============================================================
 
+async function resolveLiteApiCity(cityName, countryCode) {
+
+    const requestedCity = normalizeDestinationText(cityName);
+
+    if (!requestedCity || !countryCode) {
+        throw new Error("Ville ou code pays manquant.");
+    }
+
+    const liteApiCities = await getLiteApiCities(countryCode);
+
+    const officialCity = liteApiCities.find(city =>
+        normalizeDestinationText(city) === requestedCity
+    );
+
+    if (!officialCity) {
+        throw new Error(
+            `La ville "${cityName}" n'est pas référencée dans LiteAPI pour ${countryCode}.`
+        );
+    }
+
+    console.log("✅ VILLE OFFICIELLE LITEAPI :", officialCity);
+
+    return officialCity;
+}
 
 // ============================================================
 // 🔎 ENDPOINT TOURIZIA — LISTE DES VILLES LITEAPI
@@ -2508,18 +2535,20 @@ if (data.hotelId) {
 
 } else {
 
-    // Client a choisi une destination / ville
-    requestBody.cityName =
-        data.city;
-
-    requestBody.countryCode =
-        data.countryCode;
-
-    console.log(
-        "📍 RECHERCHE HÔTEL PAR VILLE:",
+    // Résoudre le nom GeoNames avec le catalogue officiel LiteAPI
+    const officialCity = await resolveLiteApiCity(
         data.city,
         data.countryCode
     );
+
+    requestBody.cityName = officialCity;
+    requestBody.countryCode = data.countryCode;
+
+    console.log("📍 RECHERCHE HÔTEL PAR VILLE:", {
+        cityGeoNames: data.city,
+        cityLiteAPI: officialCity,
+        countryCode: data.countryCode
+    });
 
 }
 
