@@ -2416,8 +2416,7 @@ function rankHotelOffers(offers) {
 // 🔐 TOURIZIA — STOCKAGE SÉCURISÉ DU CATALOGUE
 // ============================================================
 
-const HOTEL_CATALOGUE_TTL_MINUTES = 20;
-
+const HOTEL_CATALOGUE_TTL_MINUTES = 5;
 
 // ------------------------------------------------------------
 // CRÉER UN CATALOGUE APRÈS LA RECHERCHE LITEAPI
@@ -3573,6 +3572,9 @@ return res.status(200).json({
     available: true,
     transactionId,
     catalogueToken: catalogue.token,
+
+    // Expiration réelle du catalogue côté serveur
+    expiresAt: catalogue.expiresAt.toISOString(),
 
     request: catalogue.request,
 
