@@ -2082,34 +2082,98 @@ function buildChildrenAges(childrenCount) {
 // 🏨 RÉCUPÉRER LES DÉTAILS OFFICIELS DE L'HÔTEL VIA LITEAPI
 // ============================================================
 
+
+// ============================================================
+// 🏨 DÉTAILS HÔTELS LITEAPI — CACHE + REQUÊTES PARTAGÉES
+// ============================================================
+
+const LITEAPI_HOTEL_DETAILS_CACHE_TTL_MS =
+    6 * 60 * 60 * 1000; // 6 heures
+
+const liteApiHotelDetailsCache = new Map();
+const liteApiHotelDetailsInFlight = new Map();
+
 async function getLiteApiHotelDetails(hotelId) {
 
     if (!hotelId) {
         throw new Error("hotelId LiteAPI manquant");
     }
 
-    const url =
-        `${LITEAPI_BASE_URL}/data/hotel` +
-        `?hotelId=${encodeURIComponent(hotelId)}` +
-        `&language=fr`;
+    const key = String(hotelId);
+    const now = Date.now();
 
-    const response = await fetch(url, {
-        method: "GET",
-        headers: liteApiHeaders
-    });
+    // 1. Réutiliser les détails déjà en cache.
+    const cached = liteApiHotelDetailsCache.get(key);
 
-    const result = await response.json();
-
-    if (!response.ok) {
-        throw new Error(
-            result.message ||
-            result.error ||
-            "Impossible de récupérer les détails de l'hôtel"
-        );
+    if (cached && cached.expiresAt > now) {
+        return cached.data;
     }
 
-    return result.data || result;
+    // 2. Éviter plusieurs appels simultanés pour le même hôtel.
+    if (liteApiHotelDetailsInFlight.has(key)) {
+        return liteApiHotelDetailsInFlight.get(key);
+    }
+
+    // 3. Appel LiteAPI si aucune donnée disponible.
+    const request = (async () => {
+
+        const url =
+            `${LITEAPI_BASE_URL}/data/hotel` +
+            `?hotelId=${encodeURIComponent(key)}` +
+            `&language=fr`;
+
+        const response = await fetch(url, {
+            method: "GET",
+            headers: liteApiHeaders
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                result.message ||
+                result.error ||
+                "Impossible de récupérer les détails de l'hôtel"
+            );
+        }
+
+        const data = result.data || result;
+
+        // 4. Enregistrer les détails pendant 6 heures.
+        liteApiHotelDetailsCache.set(key, {
+            data,
+            expiresAt: Date.now() +
+                LITEAPI_HOTEL_DETAILS_CACHE_TTL_MS
+        });
+
+        // Limiter la taille du cache.
+        if (liteApiHotelDetailsCache.size > 1000) {
+
+            for (const [cacheKey, entry] of liteApiHotelDetailsCache) {
+
+                if (entry.expiresAt <= Date.now()) {
+                    liteApiHotelDetailsCache.delete(cacheKey);
+                }
+
+                if (liteApiHotelDetailsCache.size <= 800) {
+                    break;
+                }
+            }
+        }
+
+        return data;
+
+    })();
+
+    liteApiHotelDetailsInFlight.set(key, request);
+
+    try {
+        return await request;
+    } finally {
+        liteApiHotelDetailsInFlight.delete(key);
+    }
 }
+
 
 
 // ============================================================
@@ -2779,6 +2843,72 @@ const hotelMetadataById = new Map(
         .filter(([id]) => id)
 );
 
+// ============================================================
+// ⚡ TOURIZIA — PRÉCHARGEMENT PARALLÈLE DES DÉTAILS HÔTELS
+// ============================================================
+
+const hotelsNeedingDetails = hotels.filter(hotel => {
+
+    const roomTypes = Array.isArray(hotel.roomTypes)
+        ? hotel.roomTypes
+        : [];
+
+    return roomTypes.length > 0 &&
+        Boolean(hotel.hotelId || hotel.id);
+});
+
+const hotelDetailsById = new Map();
+
+let hotelDetailsIndex = 0;
+
+const HOTEL_DETAILS_CONCURRENCY = 8;
+
+async function hotelDetailsWorker() {
+
+    while (hotelDetailsIndex < hotelsNeedingDetails.length) {
+
+        const hotel = hotelsNeedingDetails[hotelDetailsIndex++];
+
+        const hotelId = hotel.hotelId || hotel.id;
+
+        try {
+
+            const details = await getLiteApiHotelDetails(hotelId);
+
+            hotelDetailsById.set(String(hotelId), details);
+
+        } catch (error) {
+
+            console.warn(
+                "⚠️ COORDONNÉES LITEAPI INDISPONIBLES:",
+                hotelId,
+                error.message
+            );
+
+            hotelDetailsById.set(String(hotelId), {});
+        }
+    }
+}
+
+const workerCount = Math.min(
+    HOTEL_DETAILS_CONCURRENCY,
+    hotelsNeedingDetails.length
+);
+
+await Promise.all(
+    Array.from(
+        { length: workerCount },
+        () => hotelDetailsWorker()
+    )
+);
+
+console.log("⚡ DÉTAILS HÔTELS TRAITÉS:", {
+    hotels: hotelsNeedingDetails.length,
+    workers: workerCount,
+    cacheEntries: liteApiHotelDetailsCache.size
+});
+
+
 console.log("🏨 LITEAPI — DIAGNOSTIC RÉPONSE:", {
     httpStatus: response.status,
     responseCode: result.code ?? null,
@@ -2842,18 +2972,9 @@ for (const hotel of hotels) {
         ...hotelMetadata,
         ...(hotel.hotelData || {})
     };
-    // Récupération des coordonnées officielles de l'établissement
-let hotelDetails = {};
-
-try {
-    hotelDetails = await getLiteApiHotelDetails(hotelId);
-} catch (error) {
-    console.warn(
-        "⚠️ COORDONNÉES LITEAPI INDISPONIBLES:",
-        hotelId,
-        error.message
-    );
-}
+   // Détails déjà préchargés en parallèle.
+const hotelDetails =
+    hotelDetailsById.get(String(hotelId)) || {};
 
     for (const room of roomTypes) {
         const rates = Array.isArray(room.rates)
