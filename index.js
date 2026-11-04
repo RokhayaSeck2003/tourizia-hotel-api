@@ -2833,6 +2833,27 @@ const hotels = Array.isArray(result.data)
     : result.data && typeof result.data === "object"
         ? [result.data]
         : [];
+        // ============================================================
+// LITEAPI — AUCUNE DISPONIBILITÉ = RÉSULTAT VIDE
+// ============================================================
+
+if (
+    Number(result?.error?.code) === 2001 ||
+    /no availability found/i.test(result?.error?.message || "")
+) {
+    console.warn("⚠️ LITEAPI : AUCUNE DISPONIBILITÉ", {
+        city: data.city,
+        checkIn: data.checkIn,
+        checkOut: data.checkOut,
+        code: result.error.code
+    });
+
+    return {
+        raw: result,
+        offers: [],
+        totalOffers: 0
+    };
+}
 
 const hotelMetadataById = new Map(
     (Array.isArray(result.hotels) ? result.hotels : [])
@@ -2858,10 +2879,8 @@ console.log("⚡ RECHERCHE RAPIDE : détails secondaires ignorés", {
     hotels: hotels.length
 });
 
-console.log("⚡ DÉTAILS HÔTELS TRAITÉS:", {
-    hotels: hotelsNeedingDetails.length,
-    workers: workerCount,
-    cacheEntries: liteApiHotelDetailsCache.size
+console.log("⚡ TOURIZIA — RECHERCHE RAPIDE:", {
+    hotelsReceived: hotels.length
 });
 
 
