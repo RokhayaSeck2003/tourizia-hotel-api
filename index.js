@@ -38,6 +38,7 @@ let mongoDb = null;
 let hotelTransactions = null;
 let stripeWebhookEvents = null;
 let hotelOfferCatalogues = null;
+let hotelDocumentJobs = null;
 
 function formatHotelError(error) {
   if (typeof error === "string") return error;
@@ -123,6 +124,37 @@ await hotelOfferCatalogues.createIndex({
 });
 
 console.log("✅ Collection catalogue hôtel prête");
+// ============================================================
+// 📄 TOURIZIA — FILE DE TRAITEMENT DES DOCUMENTS HÔTEL
+// ============================================================
+
+hotelDocumentJobs = mongoDb.collection(
+    "hotel_document_jobs"
+);
+
+// Une seule tâche documentaire par transaction.
+// Empêche de créer plusieurs fois le même dossier PDF.
+await hotelDocumentJobs.createIndex(
+    { transactionId: 1 },
+    { unique: true }
+);
+
+// Permet de retrouver rapidement les tâches à traiter.
+await hotelDocumentJobs.createIndex({
+    status: 1,
+    nextAttemptAt: 1,
+    createdAt: 1
+});
+
+// Permet de surveiller les tâches bloquées.
+await hotelDocumentJobs.createIndex({
+    status: 1,
+    lockedAt: 1
+});
+
+console.log(
+    "✅ File documentaire hôtel MongoDB prête"
+);
 
 
         await hotelTransactions.createIndex(
@@ -205,6 +237,20 @@ BOOKING_UNKNOWN:
         "ERROR"
 
 };
+
+// ============================================================
+// 📄 TOURIZIA — STATUTS DES DOCUMENTS HÔTEL
+// ============================================================
+
+
+const HOTEL_DOCUMENT_STATUS = {
+    PENDING: "PENDING",
+    PROCESSING: "PROCESSING",
+    SENT: "SENT",
+    ERROR: "ERROR",
+    MANUAL_REVIEW: "MANUAL_REVIEW"
+};
+
 
 
 // ============================================================
@@ -4440,111 +4486,156 @@ console.log("📅 CONDITIONS D'ANNULATION POUR CONFIRMATION:", {
         // 📄 GÉNÉRATION PDF + EMAIL APRÈS CONFIRMATION LITEAPI
         // ==================================================
 
-        let documentSent = false;
-        let documentError = null;
+        // ============================================================
+        // 📄 CRÉER UNE TÂCHE DOCUMENTAIRE APRÈS BOOK CONFIRMÉ
+        // ============================================================
+
+        const bookingDocument = {
+            success: true,
+            transactionId,
+
+            paymentId:
+                transaction.payment?.paymentId ||
+                transaction.payment?.stripeSessionId ||
+                transactionId,
+
+            paymentMethod:
+                transaction.payment?.method || "",
+
+            email: customer.email,
+            fullName: customer.fullName,
+            phone: customer.phone || "",
+
+            bookingId,
+            confirmationNumber,
+
+            hotelId: provider.hotelId || "",
+            hotelName: provider.hotelName || "",
+            hotelAddress: provider.hotelAddress || "",
+            hotelPhone: provider.hotelPhone || "",
+            hotelEmail: provider.hotelEmail || "",
+            hotelWebsite: provider.hotelWebsite || "",
+
+            roomName: provider.roomName || "",
+
+            city: request.city || "",
+            countryCode: request.countryCode || "",
+
+            checkIn: request.checkIn,
+            checkOut: request.checkOut,
+
+            adults: request.adults || 1,
+            children: request.children || 0,
+            rooms: request.rooms || 1,
+
+            guests: Array.isArray(request.guests)
+                ? request.guests
+                : [],
+
+            totalPersons:
+                Number(request.adults || 0) +
+                Number(request.children || 0),
+
+            providerPrice: provider.price || null,
+            providerCurrency: provider.currency || "",
+
+            refundable: refundableTag,
+            cancellationPolicies
+        };
+
+        let documentQueued = false;
+        let documentStatus = HOTEL_DOCUMENT_STATUS.ERROR;
+
+        // IMPORTANT :
+        // À partir d'ici, la réservation est déjà CONFIRMED.
+        // Une erreur documentaire ne doit jamais devenir BOOKING_UNKNOWN.
 
         try {
-            const bookingDocument = {
-                success: true,
+            const documentJobNow = new Date();
 
-                paymentId:
-                    transaction.payment?.paymentId ||
-                    transaction.payment?.stripeSessionId ||
-                    transactionId,
-
-                paymentMethod:
-                    transaction.payment?.method || "",
-
-                email: customer.email,
-                fullName: customer.fullName,
-                phone: customer.phone || "",
-
-                bookingId,
-                confirmationNumber,
-
-                hotelId: provider.hotelId || "",
-hotelName: provider.hotelName || "",
-hotelAddress: provider.hotelAddress || "",
-
-hotelPhone: provider.hotelPhone || "",
-hotelEmail: provider.hotelEmail || "",
-hotelWebsite: provider.hotelWebsite || "",
-
-roomName: provider.roomName || "",
-
-                city: request.city || "",
-                countryCode: request.countryCode || "",
-
-                checkIn: request.checkIn,
-                checkOut: request.checkOut,
-
-                adults: request.adults || 1,
-                children: request.children || 0,
-                rooms: request.rooms || 1,
-
-                guests: Array.isArray(request.guests)
-                    ? request.guests
-                    : [],
-
-                totalPersons:
-                    Number(request.adults || 0) +
-                    Number(request.children || 0),
-
-                providerPrice: provider.price || null,
-                providerCurrency: provider.currency || "",
-
-               refundable: refundableTag,
-
-cancellationPolicies:
-    cancellationPolicies
-            };
-
-            const documentResult =
-                await generateAndSendHotelConfirmation(
-                    bookingDocument
-                );
-
-            documentSent = true;
-
-            await hotelTransactions.updateOne(
+            await hotelDocumentJobs.updateOne(
                 { transactionId },
                 {
+                    $setOnInsert: {
+                        transactionId,
+                        status: HOTEL_DOCUMENT_STATUS.PENDING,
+                        booking: bookingDocument,
+                        attempts: 0,
+                        nextAttemptAt: documentJobNow,
+                        createdAt: documentJobNow,
+                        updatedAt: documentJobNow,
+                        lockedAt: null,
+                        lastError: null
+                    }
+                },
+                { upsert: true }
+            );
+
+            const savedDocumentJob =
+                await hotelDocumentJobs.findOne({ transactionId });
+
+            documentStatus =
+                savedDocumentJob?.status ||
+                HOTEL_DOCUMENT_STATUS.PENDING;
+
+            await hotelTransactions.updateOne(
+                {
+                    transactionId,
+                    status: HOTEL_TRANSACTION_STATUS.CONFIRMED
+                },
+                {
                     $set: {
-                        documentStatus: "SENT",
-                        documentSentAt: new Date(),
-                        documentReference:
-                            documentResult.reference
+                        documentStatus,
+                        documentQueuedAt: documentJobNow,
+                        updatedAt: documentJobNow
                     }
                 }
             );
 
+            documentQueued = true;
+
             console.log(
-                "✅ PDF ET EMAIL ENVOYÉS:",
-                customer.email
+                "📄 TÂCHE DOCUMENTAIRE ENREGISTRÉE:",
+                transactionId,
+                "| STATUT:",
+                documentStatus
             );
 
-        } catch (documentErrorCaught) {
-
-            documentError =
-                documentErrorCaught.message ||
-                String(documentErrorCaught);
-
+        } catch (documentError) {
             console.error(
-                "❌ ERREUR PDF / EMAIL:",
+                "❌ ERREUR FILE DOCUMENTAIRE — RÉSERVATION DÉJÀ CONFIRMÉE:",
+                transactionId,
                 documentError
             );
 
-            await hotelTransactions.updateOne(
-                { transactionId },
-                {
-                    $set: {
-                        documentStatus: "ERROR",
-                        documentError,
-                        documentErrorAt: new Date()
+            // On conserve CONFIRMED, sans jamais refaire le BOOK.
+            documentStatus = HOTEL_DOCUMENT_STATUS.ERROR;
+
+            try {
+                await hotelTransactions.updateOne(
+                    {
+                        transactionId,
+                        status: HOTEL_TRANSACTION_STATUS.CONFIRMED
+                    },
+                    {
+                        $set: {
+                            documentStatus: HOTEL_DOCUMENT_STATUS.ERROR,
+                            "documents.emailError":
+                                String(documentError.message || documentError),
+                            updatedAt: new Date()
+                        }
                     }
-                }
-            );
+                );
+            } catch (statusError) {
+                console.error(
+                    "❌ IMPOSSIBLE D'ENREGISTRER L'ERREUR DOCUMENTAIRE:",
+                    statusError
+                );
+            }
         }
+
+        // Le BOOK LiteAPI est terminé.
+        // Ne jamais transformer une erreur PDF/e-mail en BOOKING_UNKNOWN.
         bookingClaimed = false;
 
         console.log(
@@ -4558,14 +4649,15 @@ cancellationPolicies:
             transactionId,
             bookingId,
             confirmationNumber,
-                documentSent,
-    documentError,
+            documentQueued,
+            documentStatus,
             hotel: {
                 name: provider.hotelName || "",
                 room: provider.roomName || ""
             },
             message: "Réservation définitive confirmée par LiteAPI."
         });
+
 
     } catch (error) {
         console.error(
@@ -10522,6 +10614,407 @@ return {
 }
 
 // ============================================================
+// 📄 TOURIZIA — WORKER DOCUMENTAIRE HÔTEL
+// ============================================================
+
+
+// ============================================================
+// 📄 TOURIZIA — WORKER DOCUMENTAIRE HÔTEL SÉCURISÉ
+// ============================================================
+
+const HOTEL_DOCUMENT_WORKER_INTERVAL = 10000;
+const HOTEL_DOCUMENT_LOCK_TIMEOUT = 30 * 60 * 1000;
+const HOTEL_DOCUMENT_MAX_ATTEMPTS = 8;
+
+let hotelDocumentWorkerRunning = false;
+
+
+// ============================================================
+// TRAITER UNE SEULE TÂCHE DOCUMENTAIRE
+// ============================================================
+
+async function processNextHotelDocumentJob() {
+
+    if (!hotelDocumentJobs || !hotelTransactions) {
+        return;
+    }
+
+    const now = new Date();
+
+    const staleBefore = new Date(
+        now.getTime() - HOTEL_DOCUMENT_LOCK_TIMEOUT
+    );
+
+    // Réservation atomique d'une tâche.
+    // Une tâche PROCESSING ne peut être reprise
+    // qu'après expiration de son verrou de 30 minutes.
+
+    const claim = await hotelDocumentJobs.findOneAndUpdate(
+        {
+            $or: [
+                {
+                    status: HOTEL_DOCUMENT_STATUS.PENDING,
+                    attempts: { $lt: HOTEL_DOCUMENT_MAX_ATTEMPTS },
+                    nextAttemptAt: { $lte: now }
+                },
+                {
+                    status: HOTEL_DOCUMENT_STATUS.ERROR,
+                    attempts: { $lt: HOTEL_DOCUMENT_MAX_ATTEMPTS },
+                    nextAttemptAt: { $lte: now }
+                },
+                {
+                    status: HOTEL_DOCUMENT_STATUS.PROCESSING,
+                    lockedAt: { $lte: staleBefore },
+                    attempts: { $lt: HOTEL_DOCUMENT_MAX_ATTEMPTS }
+                }
+            ]
+        },
+        {
+            $set: {
+                status: HOTEL_DOCUMENT_STATUS.PROCESSING,
+                lockedAt: now,
+                updatedAt: now
+            },
+            $inc: {
+                attempts: 1
+            }
+        },
+        {
+            sort: { createdAt: 1 },
+            returnDocument: "after"
+        }
+    );
+
+    // Compatibilité MongoDB Node Driver v5/v6.
+    const job = claim?.value || claim;
+
+    if (!job || !job.transactionId) {
+        return;
+    }
+
+    const transactionId = job.transactionId;
+    const attempt = Number(job.attempts || 1);
+
+    console.log(
+        "📄 WORKER DOCUMENTAIRE:",
+        transactionId,
+        "| TENTATIVE:",
+        attempt,
+        "/",
+        HOTEL_DOCUMENT_MAX_ATTEMPTS
+    );
+
+    try {
+
+        // ----------------------------------------------------
+        // 1. VÉRIFIER QUE LA RÉSERVATION EST CONFIRMÉE
+        // ----------------------------------------------------
+
+        const transaction = await hotelTransactions.findOne(
+            { transactionId },
+            {
+                projection: {
+                    transactionId: 1,
+                    status: 1,
+                    documentStatus: 1
+                }
+            }
+        );
+
+        if (
+            !transaction ||
+            transaction.status !== HOTEL_TRANSACTION_STATUS.CONFIRMED
+        ) {
+            throw new Error(
+                "Réservation absente ou non CONFIRMED. Documents bloqués pour vérification manuelle."
+            );
+        }
+                // Si les documents ont déjà été envoyés et enregistrés,
+        // ne jamais renvoyer un deuxième e-mail.
+        if (transaction.documentStatus === HOTEL_DOCUMENT_STATUS.SENT) {
+
+            await hotelDocumentJobs.updateOne(
+                {
+                    transactionId,
+                    status: HOTEL_DOCUMENT_STATUS.PROCESSING
+                },
+                {
+                    $set: {
+                        status: HOTEL_DOCUMENT_STATUS.SENT,
+                        completedAt: new Date(),
+                        lockedAt: null,
+                        lastError: null,
+                        updatedAt: new Date()
+                    }
+                }
+            );
+
+            console.log(
+                "♻️ DOCUMENTS DÉJÀ ENVOYÉS — AUCUN RENVOI:",
+                transactionId
+            );
+
+            return;
+        }
+
+        // Ne jamais générer de documents sans adresse e-mail.
+        if (!job.booking?.email) {
+            throw new Error(
+                "Adresse e-mail absente de la tâche documentaire."
+            );
+        }
+
+
+        // ----------------------------------------------------
+        // 2. GÉNÉRER LES PDF ET ENVOYER L'E-MAIL
+        // ----------------------------------------------------
+
+        // Cette fonction ne doit effectuer aucun BOOK LiteAPI.
+        const result =
+            await generateAndSendHotelConfirmation(job.booking);
+
+        if (!result || !Array.isArray(result.pdfDocuments)) {
+            throw new Error(
+                "Résultat invalide de la génération des documents."
+            );
+        }
+
+        if (result.storageStatus !== "COMPLETE") {
+            throw new Error(
+                "Stockage Cloudinary incomplet : " +
+                JSON.stringify(result.storageErrors || [])
+            );
+        }
+
+        if (!result.emailSent) {
+            throw new Error(
+                result.emailError ||
+                "L'e-mail client n'a pas été envoyé par Resend."
+            );
+        }
+
+        // ----------------------------------------------------
+        // 3. ENREGISTRER LES DOCUMENTS
+        // ----------------------------------------------------
+
+        const completedAt = new Date();
+
+        const transactionUpdate =
+            await hotelTransactions.updateOne(
+                {
+                    transactionId,
+                    status: HOTEL_TRANSACTION_STATUS.CONFIRMED
+                },
+                {
+                    $set: {
+                        "documents.hotelConfirmationPdfs":
+                            result.pdfDocuments,
+
+                        "documents.confirmationNumber":
+                            result.reference,
+
+                        "documents.generatedAt":
+                            completedAt,
+
+                        "documents.emailSent": true,
+
+                        "documents.storageStatus":
+                            result.storageStatus,
+
+                        "documents.storageErrors":
+                            result.storageErrors || [],
+
+                        "documents.emailError": null,
+
+                        documentStatus:
+                            HOTEL_DOCUMENT_STATUS.SENT,
+
+                        documentSentAt: completedAt,
+                        updatedAt: completedAt
+                    }
+                }
+            );
+
+        if (transactionUpdate.matchedCount !== 1) {
+            throw new Error(
+                "Impossible de mettre à jour la réservation confirmée."
+            );
+        }
+
+        // ----------------------------------------------------
+        // 4. MARQUER LA TÂCHE COMME TERMINÉE
+        // ----------------------------------------------------
+
+        await hotelDocumentJobs.updateOne(
+            {
+                transactionId,
+                status: HOTEL_DOCUMENT_STATUS.PROCESSING
+            },
+            {
+                $set: {
+                    status: HOTEL_DOCUMENT_STATUS.SENT,
+                    completedAt,
+                    updatedAt: completedAt,
+                    lockedAt: null,
+                    lastError: null,
+
+                    result: {
+                        reference: result.reference,
+                        pdfCount: result.pdfDocuments.length,
+                        emailSent: true,
+                        storageStatus: result.storageStatus
+                    }
+                }
+            }
+        );
+
+        console.log(
+            "✅ DOCUMENTS HÔTEL ENVOYÉS:",
+            transactionId,
+            "| PDF:",
+            result.pdfDocuments.length
+        );
+
+    } catch (error) {
+
+        console.error(
+            "❌ ERREUR WORKER DOCUMENTAIRE:",
+            transactionId,
+            error
+        );
+
+        const failedAt = new Date();
+
+        const errorMessage =
+            String(error.message || error);
+
+        // ----------------------------------------------------
+        // 5. LIMITE DES TENTATIVES
+        // ----------------------------------------------------
+
+        const maxAttemptsReached =
+            attempt >= HOTEL_DOCUMENT_MAX_ATTEMPTS;
+
+        let nextStatus;
+        let nextAttemptAt = null;
+
+        if (maxAttemptsReached) {
+
+            nextStatus =
+                HOTEL_DOCUMENT_STATUS.MANUAL_REVIEW;
+
+            console.error(
+                "🚨 DOCUMENTS À TRAITER MANUELLEMENT:",
+                transactionId,
+                "| TENTATIVES:",
+                attempt
+            );
+
+        } else {
+
+            nextStatus =
+                HOTEL_DOCUMENT_STATUS.ERROR;
+
+            // Temporisation progressive :
+            // 1, 2, 4, 8, 16, 32, 60 minutes maximum.
+
+            const delayMinutes = Math.min(
+                60,
+                Math.pow(2, Math.min(attempt - 1, 6))
+            );
+
+            nextAttemptAt = new Date(
+                failedAt.getTime() +
+                delayMinutes * 60 * 1000
+            );
+        }
+
+        // ----------------------------------------------------
+        // 6. ENREGISTRER L'ÉCHEC DE LA TÂCHE
+        // ----------------------------------------------------
+
+        try {
+
+            await hotelDocumentJobs.updateOne(
+                {
+                    transactionId,
+                    status: HOTEL_DOCUMENT_STATUS.PROCESSING
+                },
+                {
+                    $set: {
+                        status: nextStatus,
+                        lastError: errorMessage,
+                        failedAt,
+                        nextAttemptAt,
+                        lockedAt: null,
+                        updatedAt: failedAt
+                    }
+                }
+            );
+
+                        await hotelTransactions.updateOne(
+                {
+                    transactionId,
+                    status: HOTEL_TRANSACTION_STATUS.CONFIRMED,
+                    documentStatus: { $ne: HOTEL_DOCUMENT_STATUS.SENT }
+                },
+                {
+                    $set: {
+                        documentStatus: nextStatus,
+
+                        "documents.emailError":
+                            errorMessage,
+
+                        updatedAt: failedAt
+                    }
+                }
+            );
+
+        } catch (saveError) {
+
+            console.error(
+                "❌ IMPOSSIBLE D'ENREGISTRER L'ÉCHEC DOCUMENTAIRE:",
+                transactionId,
+                saveError
+            );
+        }
+    }
+}
+
+
+// ============================================================
+// ÉVITER LES CYCLES SIMULTANÉS DANS LE MÊME PROCESSUS
+// ============================================================
+
+async function runHotelDocumentWorker() {
+
+    if (hotelDocumentWorkerRunning) {
+        return;
+    }
+
+    hotelDocumentWorkerRunning = true;
+
+    try {
+
+        await processNextHotelDocumentJob();
+
+    } catch (error) {
+
+        console.error(
+            "❌ HOTEL DOCUMENT WORKER LOOP ERROR:",
+            error
+        );
+
+    } finally {
+
+        hotelDocumentWorkerRunning = false;
+
+    }
+}
+
+
+
+// ============================================================
 // ENDPOINT DE TEST PDF HÔTEL
 // ============================================================
 //
@@ -11231,12 +11724,37 @@ async function sendToTouriziaDashboard(data) {
 // SERVER
 // ============================================================
 
+
 async function startServer() {
 
     await connectMongoDB();
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
-});
+
+    app.listen(PORT, "0.0.0.0", () => {
+
+        console.log(`Server running on port ${PORT}`);
+
+        if (hotelDocumentJobs && hotelTransactions) {
+
+            console.log(
+                "📄 HOTEL DOCUMENT WORKER ACTIVÉ"
+            );
+
+            setInterval(
+                runHotelDocumentWorker,
+                HOTEL_DOCUMENT_WORKER_INTERVAL
+            );
+
+            // Vérifier immédiatement les tâches en attente.
+            runHotelDocumentWorker();
+
+        } else {
+
+            console.error(
+                "❌ WORKER DOCUMENTAIRE NON ACTIVÉ : MongoDB indisponible"
+            );
+
+        }
+    });
 
 }
 
