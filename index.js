@@ -2847,60 +2847,16 @@ const hotelMetadataById = new Map(
 // ⚡ TOURIZIA — PRÉCHARGEMENT PARALLÈLE DES DÉTAILS HÔTELS
 // ============================================================
 
-const hotelsNeedingDetails = hotels.filter(hotel => {
-
-    const roomTypes = Array.isArray(hotel.roomTypes)
-        ? hotel.roomTypes
-        : [];
-
-    return roomTypes.length > 0 &&
-        Boolean(hotel.hotelId || hotel.id);
-});
+// ============================================================
+// ⚡ TOURIZIA — RECHERCHE RAPIDE
+// Les détails secondaires ne bloquent plus les offres.
+// ============================================================
 
 const hotelDetailsById = new Map();
 
-let hotelDetailsIndex = 0;
-
-const HOTEL_DETAILS_CONCURRENCY = 8;
-
-async function hotelDetailsWorker() {
-
-    while (hotelDetailsIndex < hotelsNeedingDetails.length) {
-
-        const hotel = hotelsNeedingDetails[hotelDetailsIndex++];
-
-        const hotelId = hotel.hotelId || hotel.id;
-
-        try {
-
-            const details = await getLiteApiHotelDetails(hotelId);
-
-            hotelDetailsById.set(String(hotelId), details);
-
-        } catch (error) {
-
-            console.warn(
-                "⚠️ COORDONNÉES LITEAPI INDISPONIBLES:",
-                hotelId,
-                error.message
-            );
-
-            hotelDetailsById.set(String(hotelId), {});
-        }
-    }
-}
-
-const workerCount = Math.min(
-    HOTEL_DETAILS_CONCURRENCY,
-    hotelsNeedingDetails.length
-);
-
-await Promise.all(
-    Array.from(
-        { length: workerCount },
-        () => hotelDetailsWorker()
-    )
-);
+console.log("⚡ RECHERCHE RAPIDE : détails secondaires ignorés", {
+    hotels: hotels.length
+});
 
 console.log("⚡ DÉTAILS HÔTELS TRAITÉS:", {
     hotels: hotelsNeedingDetails.length,
