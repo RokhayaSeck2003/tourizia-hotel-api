@@ -2416,7 +2416,7 @@ function rankHotelOffers(offers) {
 // 🔐 TOURIZIA — STOCKAGE SÉCURISÉ DU CATALOGUE
 // ============================================================
 
-const HOTEL_CATALOGUE_TTL_MINUTES = 5;
+const HOTEL_CATALOGUE_TTL_MINUTES = 10; // 10 minutes
 
 // ------------------------------------------------------------
 // CRÉER UN CATALOGUE APRÈS LA RECHERCHE LITEAPI
