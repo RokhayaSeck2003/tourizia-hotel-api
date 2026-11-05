@@ -228,10 +228,15 @@ BOOKING_UNKNOWN:
         "BOOKED",
 
     CONFIRMED:
-        "CONFIRMED",
+    "CONFIRMED",
 
-    MANUAL_SEARCH_REQUIRED:
-        "MANUAL_SEARCH_REQUIRED",
+// Réservation réellement effectuée par l'administrateur
+// auprès d'un hôtel ou d'un fournisseur externe.
+MANUAL_CONFIRMED:
+    "MANUAL_CONFIRMED",
+
+MANUAL_SEARCH_REQUIRED:
+    "MANUAL_SEARCH_REQUIRED",
 
     ERROR:
         "ERROR"
@@ -1374,6 +1379,318 @@ app.get("/api/admin/verify", requireAdmin, (req, res) => {
         authenticated: true
     });
 });
+
+
+// ============================================================
+// 🔐 ADMIN — CONFIRMER UNE RÉSERVATION HÔTEL MANUELLE
+// ============================================================
+
+
+// ============================================================
+// 🔐 ADMIN — CONFIRMER UNE RÉSERVATION HÔTEL MANUELLE
+// VERSION RÉCUPÉRABLE ET ANTI-DOUBLON
+// ============================================================
+
+app.post(
+    "/api/admin/hotel-premium-requests/:transactionId/confirm",
+    requireAdmin,
+    async (req, res) => {
+        try {
+            if (!hotelTransactions || !hotelDocumentJobs) {
+                return res.status(503).json({
+                    success: false,
+                    error: "MongoDB indisponible"
+                });
+            }
+
+            const transactionId = String(
+                req.params.transactionId || ""
+            ).trim();
+
+            const hotelName = String(
+                req.body.hotelName || ""
+            ).trim();
+
+            const hotelAddress = String(
+                req.body.hotelAddress || ""
+            ).trim();
+
+            const roomName = String(
+                req.body.roomName || ""
+            ).trim();
+
+            const confirmationNumber = String(
+                req.body.confirmationNumber || ""
+            ).trim();
+
+            if (
+                !transactionId ||
+                !hotelName ||
+                !hotelAddress ||
+                !roomName ||
+                !confirmationNumber
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error:
+                        "Le nom de l'hôtel, son adresse, la chambre et la référence réelle de confirmation sont obligatoires."
+                });
+            }
+
+            // 1. Retrouver la transaction.
+            const transaction = await hotelTransactions.findOne({
+                transactionId,
+                type: "hotel"
+            });
+
+            if (!transaction) {
+                return res.status(404).json({
+                    success: false,
+                    error: "Demande hôtel introuvable."
+                });
+            }
+
+            // 2. Le paiement doit réellement être confirmé.
+            if (transaction.payment?.status !== "PAID") {
+                return res.status(403).json({
+                    success: false,
+                    error:
+                        "Paiement non confirmé. Traitement manuel bloqué."
+                });
+            }
+
+            const MANUAL_REQUIRED =
+                HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED;
+
+            const MANUAL_CONFIRMED =
+                HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED;
+
+            const alreadyConfirmed =
+                transaction.status === MANUAL_CONFIRMED;
+
+            // 3. Autoriser une reprise uniquement pour
+            // une demande en recherche manuelle ou déjà confirmée.
+            if (
+                transaction.status !== MANUAL_REQUIRED &&
+                !alreadyConfirmed
+            ) {
+                return res.status(409).json({
+                    success: false,
+                    error:
+                        "Cette demande ne peut pas être confirmée dans son statut actuel.",
+                    status: transaction.status
+                });
+            }
+
+            // 4. Si elle est déjà confirmée, interdire
+            // de remplacer les informations de réservation.
+            if (alreadyConfirmed) {
+                const storedConfirmation =
+                    transaction.provider?.confirmationNumber ||
+                    transaction.manualSearch?.confirmationNumber;
+
+                if (
+                    storedConfirmation !== confirmationNumber ||
+                    transaction.provider?.hotelName !== hotelName ||
+                    transaction.provider?.hotelAddress !== hotelAddress ||
+                    transaction.provider?.roomName !== roomName
+                ) {
+                    return res.status(409).json({
+                        success: false,
+                        error:
+                            "Cette réservation est déjà confirmée avec d'autres informations. Vérifie la référence et les données enregistrées."
+                    });
+                }
+            }
+
+            const request = transaction.request || {};
+            const customer = transaction.customer || {};
+
+            const guests =
+                Array.isArray(request.guests) &&
+                request.guests.length
+                    ? request.guests
+                    : [{
+                        type: "adult",
+                        firstName:
+                            String(customer.fullName || "Client")
+                                .trim()
+                                .split(/\s+/)[0],
+                        lastName:
+                            String(customer.fullName || "")
+                                .trim()
+                                .split(/\s+/)
+                                .slice(1)
+                                .join(" ") || "Tourizia"
+                    }];
+
+            // 5. Préparer les données destinées
+            // au moteur PDF existant.
+            const bookingDocument = {
+                transactionId,
+                bookingId: transactionId,
+                confirmationNumber,
+
+                fullName: customer.fullName || "",
+                email: customer.email || "",
+                phone: customer.phone || "",
+
+                city: request.city || "",
+                countryCode: request.countryCode || "",
+
+                checkIn: request.checkIn || "",
+                checkOut: request.checkOut || "",
+
+                adults: Number(request.adults || 1),
+                children: Number(request.children || 0),
+                rooms: Number(request.rooms || 1),
+
+                guests,
+
+                hotelName,
+                hotelAddress,
+                roomName,
+
+                providerPrice: null,
+                providerCurrency:
+                    transaction.payment?.currency || ""
+            };
+
+            const now = new Date();
+
+            // 6. Première confirmation : verrou atomique.
+            // En cas de reprise, ne pas réécrire la transaction.
+            if (!alreadyConfirmed) {
+                const confirmationUpdate =
+                    await hotelTransactions.updateOne(
+                        {
+                            transactionId,
+                            type: "hotel",
+                            status: MANUAL_REQUIRED,
+                            "payment.status": "PAID"
+                        },
+                        {
+                            $set: {
+                                status: MANUAL_CONFIRMED,
+
+                                confirmedAt: now,
+                                manualConfirmedAt: now,
+
+                                "provider.name": "MANUAL",
+                                "provider.hotelName": hotelName,
+                                "provider.hotelAddress": hotelAddress,
+                                "provider.roomName": roomName,
+                                "provider.confirmationNumber":
+                                    confirmationNumber,
+
+                                "documents.confirmationNumber":
+                                    confirmationNumber,
+
+                                documentStatus:
+                                    HOTEL_DOCUMENT_STATUS.PENDING,
+
+                                documentQueuedAt: now,
+                                updatedAt: now,
+
+                                "manualSearch.required": false,
+                                "manualSearch.completedAt": now,
+                                "manualSearch.confirmationNumber":
+                                    confirmationNumber
+                            },
+
+                            $push: {
+                                history: {
+                                    status: MANUAL_CONFIRMED,
+                                    at: now
+                                }
+                            }
+                        }
+                    );
+
+                if (confirmationUpdate.modifiedCount !== 1) {
+                    return res.status(409).json({
+                        success: false,
+                        error:
+                            "La demande a été modifiée par un autre traitement. Actualise la page."
+                    });
+                }
+            }
+
+            // 7. Garantir l'existence d'une tâche documentaire.
+            // $setOnInsert empêche d'écraser une tâche existante.
+            try {
+                await hotelDocumentJobs.updateOne(
+                    { transactionId },
+                    {
+                        $setOnInsert: {
+                            transactionId,
+                            status: HOTEL_DOCUMENT_STATUS.PENDING,
+                            booking: bookingDocument,
+                            attempts: 0,
+                            nextAttemptAt: now,
+                            createdAt: now,
+                            updatedAt: now,
+                            lockedAt: null,
+                            lastError: null
+                        }
+                    },
+                    { upsert: true }
+                );
+            } catch (jobError) {
+                // Une requête concurrente peut avoir créé
+                // la tâche entre-temps : l'index unique protège
+                // contre les doublons.
+                if (jobError.code !== 11000) {
+                    throw jobError;
+                }
+            }
+
+            // 8. Vérifier que la tâche existe réellement.
+            const documentJob =
+                await hotelDocumentJobs.findOne({
+                    transactionId
+                });
+
+            if (!documentJob) {
+                throw new Error(
+                    "La réservation est confirmée, mais la tâche documentaire reste introuvable. Une nouvelle tentative est possible."
+                );
+            }
+
+            console.log(
+                "✅ PREMIUM MANUEL — CONFIRMATION / FILE VÉRIFIÉE:",
+                transactionId,
+                "| JOB:",
+                documentJob.status
+            );
+
+            return res.status(200).json({
+                success: true,
+                status: MANUAL_CONFIRMED,
+                transactionId,
+                documentStatus: documentJob.status,
+                message:
+                    documentJob.status === HOTEL_DOCUMENT_STATUS.SENT
+                        ? "Les documents ont déjà été envoyés."
+                        : documentJob.status === HOTEL_DOCUMENT_STATUS.PROCESSING
+                            ? "Le traitement documentaire est déjà en cours."
+                            : "Confirmation enregistrée et tâche documentaire vérifiée."
+            });
+
+        } catch (error) {
+            console.error(
+                "❌ ADMIN MANUAL HOTEL CONFIRMATION ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                error:
+                    "Impossible de finaliser la confirmation manuelle. La reprise est possible après vérification."
+            });
+        }
+    }
+);
 
 
 // ============================================================
@@ -10785,14 +11102,17 @@ async function processNextHotelDocumentJob() {
             }
         );
 
-        if (
-            !transaction ||
-            transaction.status !== HOTEL_TRANSACTION_STATUS.CONFIRMED
-        ) {
-            throw new Error(
-                "Réservation absente ou non CONFIRMED. Documents bloqués pour vérification manuelle."
-            );
-        }
+       if (
+    !transaction ||
+    ![
+        HOTEL_TRANSACTION_STATUS.CONFIRMED,
+        HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED
+    ].includes(transaction.status)
+) {
+    throw new Error(
+        "Réservation absente ou non confirmée. Documents bloqués pour vérification manuelle."
+    );
+}
                 // Si les documents ont déjà été envoyés et enregistrés,
         // ne jamais renvoyer un deuxième e-mail.
         if (transaction.documentStatus === HOTEL_DOCUMENT_STATUS.SENT) {
@@ -10865,10 +11185,15 @@ async function processNextHotelDocumentJob() {
 
         const transactionUpdate =
             await hotelTransactions.updateOne(
-                {
-                    transactionId,
-                    status: HOTEL_TRANSACTION_STATUS.CONFIRMED
-                },
+               {
+    transactionId,
+    status: {
+        $in: [
+            HOTEL_TRANSACTION_STATUS.CONFIRMED,
+            HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED
+        ]
+    }
+},
                 {
                     $set: {
                         "documents.hotelConfirmationPdfs":
@@ -11018,10 +11343,17 @@ async function processNextHotelDocumentJob() {
 
                         await hotelTransactions.updateOne(
                 {
-                    transactionId,
-                    status: HOTEL_TRANSACTION_STATUS.CONFIRMED,
-                    documentStatus: { $ne: HOTEL_DOCUMENT_STATUS.SENT }
-                },
+    transactionId,
+    status: {
+        $in: [
+            HOTEL_TRANSACTION_STATUS.CONFIRMED,
+            HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED
+        ]
+    },
+    documentStatus: {
+        $ne: HOTEL_DOCUMENT_STATUS.SENT
+    }
+},
                 {
                     $set: {
                         documentStatus: nextStatus,
