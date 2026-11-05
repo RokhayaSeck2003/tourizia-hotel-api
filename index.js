@@ -1375,6 +1375,70 @@ app.get("/api/admin/verify", requireAdmin, (req, res) => {
     });
 });
 
+
+// ============================================================
+// ✨ ADMIN — LISTE DES DEMANDES HÔTEL PREMIUM
+// ============================================================
+
+app.get(
+    "/api/admin/hotel-premium-requests",
+    requireAdmin,
+    async (req, res) => {
+
+        try {
+
+            if (!hotelTransactions) {
+                return res.status(503).json({
+                    success: false,
+                    error: "MongoDB indisponible"
+                });
+            }
+
+            const requests = await hotelTransactions
+                .find({
+                    type: "hotel",
+                    status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED
+                })
+                .sort({ createdAt: -1 })
+                .limit(200)
+                .project({
+                    _id: 0,
+                    transactionId: 1,
+                    status: 1,
+                    customer: 1,
+                    request: 1,
+                    payment: 1,
+                    manualSearch: 1,
+                    createdAt: 1,
+                    updatedAt: 1
+                })
+                .toArray();
+
+            res.set("Cache-Control", "private, no-store");
+
+            return res.json({
+                success: true,
+                count: requests.length,
+                requests
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ADMIN HOTEL PREMIUM REQUESTS ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                error: "Impossible de récupérer les demandes Premium"
+            });
+
+        }
+    }
+);
+
+
 // ============================================================
 // 🔐 ADMIN — LISTE PRIVÉE DES RÉSERVATIONS HÔTELS
 // ============================================================
