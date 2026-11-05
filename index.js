@@ -879,7 +879,7 @@ const stripePaymentUpdate = await hotelTransactions.updateOne(
     {
         transactionId,
         type: "hotel",
-        status: HOTEL_TRANSACTION_STATUS.PAYMENT_PENDING
+        "payment.status": { $ne: "PAID" }
     },
     {
         $set: {
