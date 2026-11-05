@@ -1390,12 +1390,17 @@ app.get("/api/admin/verify", requireAdmin, (req, res) => {
 // 🔐 ADMIN — CONFIRMER UNE RÉSERVATION HÔTEL MANUELLE
 // VERSION RÉCUPÉRABLE ET ANTI-DOUBLON
 // ============================================================
+// ============================================================
+// 🔐 ADMIN — ENREGISTRER / CONFIRMER UNE DEMANDE PREMIUM
+// ============================================================
 
 app.post(
     "/api/admin/hotel-premium-requests/:transactionId/confirm",
     requireAdmin,
     async (req, res) => {
+
         try {
+
             if (!hotelTransactions || !hotelDocumentJobs) {
                 return res.status(503).json({
                     success: false,
@@ -1407,37 +1412,134 @@ app.post(
                 req.params.transactionId || ""
             ).trim();
 
-            const hotelName = String(
-                req.body.hotelName || ""
-            ).trim();
+            const body = req.body || {};
 
-            const hotelAddress = String(
-                req.body.hotelAddress || ""
-            ).trim();
+            // ------------------------------------------------
+            // 1. RÉCUPÉRER ET NORMALISER LES INFORMATIONS
+            // ------------------------------------------------
 
-            const roomName = String(
-                req.body.roomName || ""
-            ).trim();
+            const hotelName = String(body.hotelName || "").trim();
+            const hotelAddress = String(body.hotelAddress || "").trim();
+            const hotelPhone = String(body.hotelPhone || "").trim();
+            const hotelEmail = String(body.hotelEmail || "").trim();
+            const hotelWebsite = String(body.hotelWebsite || "").trim();
 
+            const providerName = String(body.provider || "").trim();
+            const roomName = String(body.roomName || "").trim();
+
+            const bookingId = String(body.bookingId || "").trim();
             const confirmationNumber = String(
-                req.body.confirmationNumber || ""
+                body.confirmationNumber || ""
             ).trim();
+
+            const price =
+                body.price === "" || body.price === null ||
+                body.price === undefined
+                    ? null
+                    : Number(body.price);
+
+            const currency = String(body.currency || "").trim().toUpperCase();
+            const mealPlan = String(body.mealPlan || "").trim();
+            const taxes = String(body.taxes || "").trim();
+            const rateConditions = String(
+                body.rateConditions || ""
+            ).trim();
+
+            const refundable = String(
+                body.refundable || ""
+            ).trim();
+
+            const cancellationDeadline = String(
+                body.cancellationDeadline || ""
+            ).trim();
+
+            const cancellationPolicy = String(
+                body.cancellationPolicy || ""
+            ).trim();
+
+            const bookingStatus = String(
+                body.bookingStatus || "PENDING"
+            ).trim().toUpperCase();
+
+            // ------------------------------------------------
+            // 2. VALIDATIONS
+            // ------------------------------------------------
+
+            if (!transactionId) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Identifiant de transaction manquant."
+                });
+            }
 
             if (
-                !transactionId ||
                 !hotelName ||
                 !hotelAddress ||
-                !roomName ||
-                !confirmationNumber
+                !providerName ||
+                !roomName
             ) {
                 return res.status(400).json({
                     success: false,
                     error:
-                        "Le nom de l'hôtel, son adresse, la chambre et la référence réelle de confirmation sont obligatoires."
+                        "L'hôtel, son adresse, le fournisseur et la chambre sont obligatoires."
                 });
             }
 
-            // 1. Retrouver la transaction.
+            if (
+                !["PENDING", "TREATED"].includes(bookingStatus)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Statut de réservation invalide."
+                });
+            }
+
+            if (
+                !["", "REFUNDABLE", "NON_REFUNDABLE", "PARTIALLY_REFUNDABLE"]
+                    .includes(refundable)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Type de tarif invalide."
+                });
+            }
+
+            if (
+                price !== null &&
+                (!Number.isFinite(price) || price < 0)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Le prix indiqué est invalide."
+                });
+            }
+
+            if (
+                cancellationDeadline &&
+                Number.isNaN(new Date(cancellationDeadline).getTime())
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error: "La date limite d'annulation est invalide."
+                });
+            }
+
+            // Les deux identifiants doivent être strictement identiques.
+            if (
+                bookingStatus === "TREATED" &&
+                (!bookingId || bookingId !== confirmationNumber)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error:
+                        "Le Booking ID et la référence doivent être identiques."
+                });
+            }
+
+            // ------------------------------------------------
+            // 3. RETROUVER LA TRANSACTION
+            // ------------------------------------------------
+
             const transaction = await hotelTransactions.findOne({
                 transactionId,
                 type: "hotel"
@@ -1450,65 +1552,67 @@ app.post(
                 });
             }
 
-            // 2. Le paiement doit réellement être confirmé.
             if (transaction.payment?.status !== "PAID") {
                 return res.status(403).json({
                     success: false,
                     error:
-                        "Paiement non confirmé. Traitement manuel bloqué."
+                        "Paiement non confirmé. Traitement Premium bloqué."
                 });
             }
 
-            const MANUAL_REQUIRED =
-                HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED;
+            const allowedStatuses = [
+                HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+                HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED
+            ];
 
-            const MANUAL_CONFIRMED =
-                HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED;
-
-            const alreadyConfirmed =
-                transaction.status === MANUAL_CONFIRMED;
-
-            // 3. Autoriser une reprise uniquement pour
-            // une demande en recherche manuelle ou déjà confirmée.
-            if (
-                transaction.status !== MANUAL_REQUIRED &&
-                !alreadyConfirmed
-            ) {
+            if (!allowedStatuses.includes(transaction.status)) {
                 return res.status(409).json({
                     success: false,
-                    error:
-                        "Cette demande ne peut pas être confirmée dans son statut actuel.",
+                    error: "Cette demande ne peut pas être traitée dans son statut actuel.",
                     status: transaction.status
                 });
             }
 
-            // 4. Si elle est déjà confirmée, interdire
-            // de remplacer les informations de réservation.
-            if (alreadyConfirmed) {
-                const storedConfirmation =
-                    transaction.provider?.confirmationNumber ||
-                    transaction.manualSearch?.confirmationNumber;
+            // ------------------------------------------------
+            // 4. CONSTRUIRE LE DOSSIER PREMIUM COMPLET
+            // ------------------------------------------------
 
-                if (
-                    storedConfirmation !== confirmationNumber ||
-                    transaction.provider?.hotelName !== hotelName ||
-                    transaction.provider?.hotelAddress !== hotelAddress ||
-                    transaction.provider?.roomName !== roomName
-                ) {
-                    return res.status(409).json({
-                        success: false,
-                        error:
-                            "Cette réservation est déjà confirmée avec d'autres informations. Vérifie la référence et les données enregistrées."
-                    });
-                }
-            }
+            const premiumDetails = {
+                hotelName,
+                hotelAddress,
+                hotelPhone,
+                hotelEmail,
+                hotelWebsite,
+
+                providerName,
+                roomName,
+
+                bookingId,
+                confirmationNumber,
+
+                price,
+                currency,
+                mealPlan,
+                taxes,
+                rateConditions,
+
+                refundable,
+                cancellationDeadline:
+                    cancellationDeadline
+                        ? new Date(cancellationDeadline)
+                        : null,
+
+                cancellationPolicy,
+
+                bookingStatus,
+                updatedAt: new Date()
+            };
 
             const request = transaction.request || {};
             const customer = transaction.customer || {};
 
             const guests =
-                Array.isArray(request.guests) &&
-                request.guests.length
+                Array.isArray(request.guests) && request.guests.length
                     ? request.guests
                     : [{
                         type: "adult",
@@ -1524,12 +1628,78 @@ app.post(
                                 .join(" ") || "Tourizia"
                     }];
 
-            // 5. Préparer les données destinées
-            // au moteur PDF existant.
+            // ------------------------------------------------
+            // 5. STATUT EN ATTENTE : SAUVEGARDER SANS PDF
+            // ------------------------------------------------
+
+            if (bookingStatus === "PENDING") {
+
+                if (
+                    transaction.status ===
+                    HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED
+                ) {
+                    return res.status(409).json({
+                        success: false,
+                        error:
+                            "Cette réservation est déjà confirmée. Ses informations ne peuvent plus être remplacées."
+                    });
+                }
+
+                const saved = await hotelTransactions.updateOne(
+                    {
+                        transactionId,
+                        type: "hotel",
+                        status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+                        "payment.status": "PAID"
+                    },
+                    {
+                        $set: {
+                            manualSearch: {
+                                ...(transaction.manualSearch || {}),
+                                required: true,
+                                draft: premiumDetails,
+                                lastSavedAt: new Date()
+                            },
+                            updatedAt: new Date()
+                        }
+                    }
+                );
+
+                if (saved.matchedCount !== 1) {
+                    return res.status(409).json({
+                        success: false,
+                        error:
+                            "La demande a changé pendant l'enregistrement. Actualise le tableau de bord."
+                    });
+                }
+
+                console.log(
+                    "⏳ PREMIUM — DOSSIER EN ATTENTE ENREGISTRÉ :",
+                    transactionId
+                );
+
+                return res.status(200).json({
+                    success: true,
+                    status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+                    bookingStatus: "PENDING",
+                    documentStatus: "NOT_QUEUED",
+                    transactionId,
+                    message:
+                        "Informations enregistrées. Aucun PDF ni e-mail n'a été lancé : la réservation reste en attente."
+                });
+            }
+
+            // ------------------------------------------------
+            // 6. STATUT TRAITÉ : RÉSERVATION RÉELLE VÉRIFIÉE
+            // ------------------------------------------------
+
             const bookingDocument = {
+
                 transactionId,
-                bookingId: transactionId,
-                confirmationNumber,
+
+                // Même référence dans les deux propriétés
+                bookingId,
+                confirmationNumber: bookingId,
 
                 fullName: customer.fullName || "",
                 email: customer.email || "",
@@ -1549,65 +1719,106 @@ app.post(
 
                 hotelName,
                 hotelAddress,
+                hotelPhone,
+                hotelEmail,
+                hotelWebsite,
+
+                providerName,
                 roomName,
 
-                providerPrice: null,
-                providerCurrency:
-                    transaction.payment?.currency || ""
+                providerPrice: price,
+                providerCurrency: currency,
+
+                mealPlan,
+                taxes,
+                rateConditions,
+
+                refundable,
+                cancellationDeadline:
+                    premiumDetails.cancellationDeadline,
+                cancellationPolicy
             };
 
             const now = new Date();
 
-            // 6. Première confirmation : verrou atomique.
-            // En cas de reprise, ne pas réécrire la transaction.
-            if (!alreadyConfirmed) {
-                const confirmationUpdate =
-                    await hotelTransactions.updateOne(
-                        {
-                            transactionId,
-                            type: "hotel",
-                            status: MANUAL_REQUIRED,
-                            "payment.status": "PAID"
-                        },
-                        {
-                            $set: {
-                                status: MANUAL_CONFIRMED,
+            // ------------------------------------------------
+            // 7. CONFIRMATION ATOMIQUE
+            // ------------------------------------------------
 
-                                confirmedAt: now,
-                                manualConfirmedAt: now,
+            if (
+                transaction.status ===
+                HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED
+            ) {
 
-                                "provider.name": "MANUAL",
-                                "provider.hotelName": hotelName,
-                                "provider.hotelAddress": hotelAddress,
-                                "provider.roomName": roomName,
-                                "provider.confirmationNumber":
-                                    confirmationNumber,
+                const stored =
+                    transaction.manualBooking || {};
 
-                                "documents.confirmationNumber":
-                                    confirmationNumber,
+                if (
+                    stored.bookingId !== bookingId ||
+                    stored.hotelName !== hotelName ||
+                    stored.hotelAddress !== hotelAddress ||
+                    stored.roomName !== roomName
+                ) {
+                    return res.status(409).json({
+                        success: false,
+                        error:
+                            "Cette réservation est déjà confirmée avec d'autres informations. Aucune modification automatique n'est autorisée."
+                    });
+                }
 
-                                documentStatus:
-                                    HOTEL_DOCUMENT_STATUS.PENDING,
+            } else {
 
-                                documentQueuedAt: now,
-                                updatedAt: now,
+                const confirmed = await hotelTransactions.updateOne(
+                    {
+                        transactionId,
+                        type: "hotel",
+                        status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+                        "payment.status": "PAID"
+                    },
+                    {
+                        $set: {
+                            status: HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED,
 
-                                "manualSearch.required": false,
-                                "manualSearch.completedAt": now,
-                                "manualSearch.confirmationNumber":
-                                    confirmationNumber
+                            confirmedAt: now,
+                            manualConfirmedAt: now,
+
+                            manualBooking: {
+                                ...premiumDetails,
+                                verifiedAt: now
                             },
 
-                            $push: {
-                                history: {
-                                    status: MANUAL_CONFIRMED,
-                                    at: now
-                                }
+                            "provider.name": providerName,
+                            "provider.hotelName": hotelName,
+                            "provider.hotelAddress": hotelAddress,
+                            "provider.hotelPhone": hotelPhone,
+                            "provider.hotelEmail": hotelEmail,
+                            "provider.hotelWebsite": hotelWebsite,
+                            "provider.roomName": roomName,
+                            "provider.bookingId": bookingId,
+                            "provider.confirmationNumber": bookingId,
+                            "provider.price": price,
+                            "provider.currency": currency,
+
+                            "documents.confirmationNumber": bookingId,
+
+                            documentStatus: HOTEL_DOCUMENT_STATUS.PENDING,
+                            documentQueuedAt: now,
+                            updatedAt: now,
+
+                            "manualSearch.required": false,
+                            "manualSearch.completedAt": now
+                        },
+
+                        $push: {
+                            history: {
+                                status: HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED,
+                                at: now
                             }
                         }
-                    );
+                    }
+                );
 
-                if (confirmationUpdate.modifiedCount !== 1) {
+                if (confirmed.modifiedCount !== 1) {
                     return res.status(409).json({
                         success: false,
                         error:
@@ -1616,9 +1827,12 @@ app.post(
                 }
             }
 
-            // 7. Garantir l'existence d'une tâche documentaire.
-            // $setOnInsert empêche d'écraser une tâche existante.
+            // ------------------------------------------------
+            // 8. CRÉER UNE SEULE TÂCHE PDF
+            // ------------------------------------------------
+
             try {
+
                 await hotelDocumentJobs.updateOne(
                     { transactionId },
                     {
@@ -1636,57 +1850,53 @@ app.post(
                     },
                     { upsert: true }
                 );
+
             } catch (jobError) {
-                // Une requête concurrente peut avoir créé
-                // la tâche entre-temps : l'index unique protège
-                // contre les doublons.
+
                 if (jobError.code !== 11000) {
                     throw jobError;
                 }
             }
 
-            // 8. Vérifier que la tâche existe réellement.
-            const documentJob =
-                await hotelDocumentJobs.findOne({
-                    transactionId
-                });
+            const documentJob = await hotelDocumentJobs.findOne({
+                transactionId
+            });
 
             if (!documentJob) {
                 throw new Error(
-                    "La réservation est confirmée, mais la tâche documentaire reste introuvable. Une nouvelle tentative est possible."
+                    "Tâche documentaire introuvable après confirmation."
                 );
             }
 
             console.log(
-                "✅ PREMIUM MANUEL — CONFIRMATION / FILE VÉRIFIÉE:",
+                "✅ PREMIUM MANUEL CONFIRMÉ :",
                 transactionId,
-                "| JOB:",
+                "| DOCUMENTS :",
                 documentJob.status
             );
 
             return res.status(200).json({
                 success: true,
-                status: MANUAL_CONFIRMED,
+                status: HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED,
                 transactionId,
                 documentStatus: documentJob.status,
                 message:
                     documentJob.status === HOTEL_DOCUMENT_STATUS.SENT
                         ? "Les documents ont déjà été envoyés."
-                        : documentJob.status === HOTEL_DOCUMENT_STATUS.PROCESSING
-                            ? "Le traitement documentaire est déjà en cours."
-                            : "Confirmation enregistrée et tâche documentaire vérifiée."
+                        : "Réservation vérifiée. Tâche documentaire enregistrée."
             });
 
         } catch (error) {
+
             console.error(
-                "❌ ADMIN MANUAL HOTEL CONFIRMATION ERROR:",
+                "❌ ADMIN PREMIUM SAVE ERROR:",
                 error
             );
 
             return res.status(500).json({
                 success: false,
                 error:
-                    "Impossible de finaliser la confirmation manuelle. La reprise est possible après vérification."
+                    "Impossible d'enregistrer le dossier Premium. Vérifie les logs du backend."
             });
         }
     }
@@ -1695,6 +1905,11 @@ app.post(
 
 // ============================================================
 // ✨ ADMIN — LISTE DES DEMANDES HÔTEL PREMIUM
+// ============================================================
+
+// ============================================================
+// ✨ ADMIN — LISTE DES DEMANDES HÔTEL PREMIUM
+// Demandes en attente + réservations manuelles confirmées
 // ============================================================
 
 app.get(
@@ -1714,18 +1929,38 @@ app.get(
             const requests = await hotelTransactions
                 .find({
                     type: "hotel",
-                    status: HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED
+                    status: {
+                        $in: [
+                            HOTEL_TRANSACTION_STATUS.MANUAL_SEARCH_REQUIRED,
+                            HOTEL_TRANSACTION_STATUS.MANUAL_CONFIRMED
+                        ]
+                    }
                 })
                 .sort({ createdAt: -1 })
                 .limit(200)
                 .project({
                     _id: 0,
+
                     transactionId: 1,
                     status: 1,
+
                     customer: 1,
                     request: 1,
                     payment: 1,
+
+                    // Demande initiale et brouillon administrateur
                     manualSearch: 1,
+
+                    // Réservation réellement confirmée
+                    manualBooking: 1,
+
+                    // Suivi des documents PDF et e-mail
+                    documentStatus: 1,
+                    documents: 1,
+                    confirmedAt: 1,
+                    manualConfirmedAt: 1,
+                    documentQueuedAt: 1,
+
                     createdAt: 1,
                     updatedAt: 1
                 })
@@ -9085,6 +9320,17 @@ function formatCancellationDate(value) {
 }
 
 function buildCancellationPolicyText(data = {}) {
+
+    // Pour une réservation Premium manuelle,
+    // le texte saisi par l'administrateur est prioritaire.
+    const manualPolicy = String(
+        data.cancellationPolicy || ""
+    ).trim();
+
+    if (manualPolicy) {
+        return manualPolicy;
+    }
+
     const policies = data.cancellationPolicies;
 
     if (!policies || typeof policies !== "object") {
@@ -9103,7 +9349,10 @@ function buildCancellationPolicyText(data = {}) {
         ? policies.cancelPolicyInfos
         : [];
 
-    if (["NRFN", "NRF", "NONREFUNDABLE", "NON_REFUNDABLE"].includes(tag)) {
+    if (
+        ["NRFN", "NRF", "NONREFUNDABLE", "NON_REFUNDABLE"]
+            .includes(tag)
+    ) {
         return [
             "Tarif non remboursable",
             "Les conditions de remboursement dépendent du tarif confirmé.",
@@ -9126,15 +9375,21 @@ function buildCancellationPolicyText(data = {}) {
     ];
 
     for (const policy of infos) {
-        const deadline = formatCancellationDate(policy.cancelTime);
-        const amount = Number(policy.amount);
-        const currency = String(policy.currency || "").trim();
 
-        if (deadline) {
-            lines.push(`Date d'application de la règle : ${deadline}`);
-        } else {
-            lines.push("Date limite : non disponible");
-        }
+        const deadline = formatCancellationDate(
+            policy.cancelTime
+        );
+
+        const amount = Number(policy.amount);
+        const currency = String(
+            policy.currency || ""
+        ).trim();
+
+        lines.push(
+            deadline
+                ? `Date d'application de la règle : ${deadline}`
+                : "Date limite : non disponible"
+        );
 
         if (
             policy.amount !== null &&
@@ -9142,21 +9397,19 @@ function buildCancellationPolicyText(data = {}) {
             Number.isFinite(amount) &&
             amount >= 0
         ) {
-            if (amount === 0) {
-                lines.push(
-    "Frais d’annulation prévus : 0 (sans frais selon cette règle)"
-);
-            } else {
-                lines.push(
-                    `Montant des frais d’annulation : ${amount.toFixed(2)} ${currency}`.trim()
-                );
-            }
+            lines.push(
+                amount === 0
+                    ? "Frais d’annulation prévus : 0 (sans frais selon cette règle)"
+                    : `Montant des frais d’annulation : ${amount.toFixed(2)} ${currency}`.trim()
+            );
         } else {
-           lines.push("Montant des frais d’annulation : non précisé");
+            lines.push("Montant des frais d’annulation : non précisé");
         }
 
         if (policy.cancelType) {
-           lines.push(`Type de frais d’annulation : ${String(policy.cancelType)}`);
+            lines.push(
+                `Type de frais d’annulation : ${String(policy.cancelType)}`
+            );
         }
 
         lines.push("");
@@ -9250,7 +9503,38 @@ const destination =
         Number(data.rooms || 1);
        
 const refundable = data.refundable || null;
+
+const providerName = String(
+    data.providerName || "LiteAPI"
+).trim();
+
 const providerPriceNumber = Number(data.providerPrice);
+
+const mealPlan = String(
+    data.mealPlan || ""
+).trim();
+
+const taxes = String(
+    data.taxes || ""
+).trim();
+
+const rateConditions = String(
+    data.rateConditions || ""
+).trim();
+
+const bookingId = String(
+    data.bookingId || data.confirmationNumber || ""
+).trim();
+
+const cancellationDeadline = formatCancellationDate(
+    data.cancellationDeadline
+);
+
+const refundableLabel = {
+    REFUNDABLE: "Remboursable",
+    NON_REFUNDABLE: "Non remboursable",
+    PARTIALLY_REFUNDABLE: "Partiellement remboursable"
+}[String(refundable || "").toUpperCase()] || String(refundable || "");
 
 const providerPriceLabel =
     data.providerPrice !== null &&
@@ -9993,28 +10277,36 @@ ${
 
                 <div class="row">
 
-                    <div class="row-label">
-                        Fournisseur
-                    </div>
+    <div class="row-label">
+        Fournisseur
+    </div>
 
-                    <div class="row-value">
-                        LiteAPI
-                    </div>
+    <div class="row-value">
+        ${escapeHtml(providerName)}
+    </div>
 
-                </div>
+</div>
 
-
-                <div class="row">
+<div class="row">
 
     <div class="row-label">
         Booking ID
     </div>
 
     <div class="row-value">
-        ${escapeHtml(
-            data.bookingId ||
-            "Non disponible"
-        )}
+        ${escapeHtml(bookingId || "Non disponible")}
+    </div>
+
+</div>
+
+<div class="row">
+
+    <div class="row-label">
+        Référence de confirmation
+    </div>
+
+    <div class="row-value">
+        ${escapeHtml(reference)}
     </div>
 
 </div>
@@ -10026,13 +10318,17 @@ ${
         </div>
 
 
-        ${
-    refundable || providerPriceLabel
+       ${
+    providerPriceLabel ||
+    refundableLabel ||
+    mealPlan ||
+    taxes ||
+    rateConditions
         ? `
             <div class="section">
 
                 <div class="section-title">
-                    Conditions tarifaires
+                    Conditions tarifaires et prestations
                 </div>
 
                 <div class="notice">
@@ -10040,8 +10336,8 @@ ${
                     ${
                         providerPriceLabel
                             ? `
-                                <div style="font-weight:700; margin-bottom:6px;">
-                                    Prix total de la chambre :
+                                <div style="margin-bottom:7px;">
+                                    <strong>Prix total :</strong>
                                     ${escapeHtml(providerPriceLabel)}
                                 </div>
                               `
@@ -10049,14 +10345,47 @@ ${
                     }
 
                     ${
-                        refundable
+                        refundableLabel
                             ? `
-                                <div>
-                                    ${escapeHtml(
-                                        typeof refundable === "string"
-                                            ? refundable
-                                            : JSON.stringify(refundable)
-                                    )}
+                                <div style="margin-bottom:7px;">
+                                    <strong>Type de tarif :</strong>
+                                    ${escapeHtml(refundableLabel)}
+                                </div>
+                              `
+                            : ""
+                    }
+
+                    ${
+                        mealPlan
+                            ? `
+                                <div style="margin-bottom:7px;">
+                                    <strong>Repas :</strong>
+                                    ${escapeHtml(mealPlan)}
+                                </div>
+                              `
+                            : ""
+                    }
+
+                    ${
+                        taxes
+                            ? `
+                                <div style="margin-bottom:7px;">
+                                    <strong>Taxes et frais :</strong>
+                                    ${escapeHtml(taxes)}
+                                </div>
+                              `
+                            : ""
+                    }
+
+                    ${
+                        rateConditions
+                            ? `
+                                <div style="margin-top:9px;">
+                                    <strong>Conditions du tarif :</strong>
+
+                                    <div style="margin-top:5px; white-space:pre-line;">
+                                        ${escapeHtml(rateConditions)}
+                                    </div>
                                 </div>
                               `
                             : ""
@@ -10067,6 +10396,7 @@ ${
             </div>
           `
         : ""
+
 }
 
         <div class="section">
@@ -10075,10 +10405,38 @@ ${
         Politique d'annulation
     </div>
 
-    <div class="notice">
+   <div class="notice">
+
+    <strong>
+        Restez flexible !
+    </strong>
+
+    <div style="margin-top:10px;">
+
+        ${
+            refundableLabel
+                ? `
+                    <div style="margin-bottom:7px;">
+                        <strong>Type de remboursement :</strong>
+                        ${escapeHtml(refundableLabel)}
+                    </div>
+                  `
+                : ""
+        }
+
+        ${
+            cancellationDeadline
+                ? `
+                    <div style="margin-bottom:7px;">
+                        <strong>Date limite d'annulation :</strong>
+                        ${escapeHtml(cancellationDeadline)}
+                    </div>
+                  `
+                : ""
+        }
 
         <strong>
-            Restez flexible !
+            Conditions d'annulation
         </strong>
 
         <div style="
@@ -10091,6 +10449,7 @@ ${
     </div>
 
 </div>
+
 <div class="section">
 
     <div class="section-title">
