@@ -606,6 +606,13 @@ app.post(
     }),
     async (req, res) => {
 
+        console.log("🔥 WEBHOOK HOTEL REÇU", {
+    method: req.method,
+    path: req.originalUrl,
+    signaturePresent: !!req.headers["stripe-signature"],
+    contentType: req.headers["content-type"],
+    bodyIsBuffer: Buffer.isBuffer(req.body)
+});
         console.log(
             "💳🔥 STRIPE HOTEL WEBHOOK"
         );
@@ -1544,6 +1551,14 @@ app.post(
                 transactionId,
                 type: "hotel"
             });
+            console.log("🔎 DIAGNOSTIC PREMIUM HOTEL", {
+    transactionId,
+    found: !!transaction,
+    transactionStatus: transaction?.status || null,
+    paymentStatus: transaction?.payment?.status || null,
+    paymentMethod: transaction?.payment?.method || null,
+    stripeSessionId: transaction?.payment?.stripeSessionId || null
+});
 
             if (!transaction) {
                 return res.status(404).json({
