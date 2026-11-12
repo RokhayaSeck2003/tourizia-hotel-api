@@ -10314,17 +10314,7 @@ ${
 
 </div>
 
-<div class="row">
 
-    <div class="row-label">
-        Référence de confirmation
-    </div>
-
-    <div class="row-value">
-        ${escapeHtml(reference)}
-    </div>
-
-</div>
 
 </div> 
 
