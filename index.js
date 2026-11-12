@@ -4544,7 +4544,7 @@ app.post("/api/prebook-selected-hotel", async (req, res) => {
         }
 
         // 2. L'offerId vient exclusivement de MongoDB.
-        const offerId = transaction.provider?.offerId;
+        let offerId = transaction.provider?.offerId;
 
         if (
             typeof offerId !== "string" ||
@@ -4598,6 +4598,110 @@ app.post("/api/prebook-selected-hotel", async (req, res) => {
         }
 
         prebookClaimed = true;
+
+        // ============================================================
+        // TOURIZIA — ACTUALISATION DE L'OFFRE AVANT PREBOOK
+        // ============================================================
+
+        console.log("🔄 ACTUALISATION DE L'OFFRE AVANT PREBOOK:", {
+            transactionId,
+            hotelId: transaction.provider?.hotelId,
+            roomName: transaction.provider?.roomName
+        });
+
+        const freshSearch = await searchHotelOffers({
+            ...transaction.request,
+            hotelId: transaction.provider?.hotelId
+        });
+
+        const normalizeRoomName = value =>
+            String(value || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/\s+/g, " ")
+                .trim()
+                .toLowerCase();
+
+        const expectedHotelId =
+            String(transaction.provider?.hotelId || "");
+
+        const expectedRoomName =
+            normalizeRoomName(transaction.provider?.roomName);
+
+        const expectedPrice =
+            Number(transaction.provider?.price);
+
+        const expectedCurrency =
+            String(transaction.provider?.currency || "")
+                .toUpperCase();
+
+        const freshOffer = (freshSearch.offers || []).find(offer => {
+
+            const sameHotel =
+                String(offer.hotelId || "") === expectedHotelId;
+
+            const sameRoom =
+                normalizeRoomName(offer.roomName) === expectedRoomName;
+
+            const sameCurrency =
+                String(offer.currency || "").toUpperCase() ===
+                expectedCurrency;
+
+            const samePrice =
+                Number.isFinite(expectedPrice) &&
+                Math.abs(Number(offer.price) - expectedPrice) < 0.01;
+
+            return (
+                sameHotel &&
+                sameRoom &&
+                sameCurrency &&
+                samePrice &&
+                Boolean(offer.offerId)
+            );
+        });
+
+        if (!freshOffer) {
+            throw new Error(
+                "L'offre choisie n'est plus disponible au même prix. " +
+                "Une nouvelle sélection est nécessaire."
+            );
+        }
+
+        // Remplacer uniquement l'ancien identifiant fournisseur.
+        const freshOfferId = freshOffer.offerId;
+
+        const refreshUpdate = await hotelTransactions.updateOne(
+            {
+                transactionId,
+                type: "hotel",
+                status: HOTEL_TRANSACTION_STATUS.PREBOOKING,
+                "provider.offerId": offerId
+            },
+            {
+                $set: {
+                    "provider.offerId": freshOfferId,
+                    "provider.lastOfferRefreshAt": new Date()
+                }
+            }
+        );
+
+        if (refreshUpdate.modifiedCount !== 1) {
+            throw new Error(
+                "Impossible d'actualiser l'offre sélectionnée dans MongoDB."
+            );
+        }
+
+        offerId = freshOfferId;
+
+        console.log("✅ OFFRE ACTUALISÉE:", {
+            transactionId,
+            hotelId: freshOffer.hotelId,
+            roomName: freshOffer.roomName,
+            price: freshOffer.price,
+            currency: freshOffer.currency
+        });
+
+
 
         // 5. Appel LiteAPI avec l'offerId récupéré dans MongoDB.
         console.log(
