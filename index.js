@@ -2455,6 +2455,153 @@ app.get("/api/admin/hotel-financials", requireAdmin, async (req, res) => {
     }
 });
 
+// ============================================================
+// 🤝 ADMIN — SUIVI DES COMMISSIONS PARTENAIRES HÔTELS
+// ============================================================
+
+app.get(
+    "/api/admin/hotel-partner-commissions",
+    requireAdmin,
+    async (req, res) => {
+        try {
+            if (!hotelTransactions) {
+                return res.status(503).json({
+                    success: false,
+                    error: "MongoDB indisponible"
+                });
+            }
+
+            const transactions = await hotelTransactions.find({
+                type: "hotel",
+                "promo.code": { $exists: true, $ne: null }
+            }).toArray();
+
+            const partners = Object.entries(
+                HOTEL_PROMO_CONFIG.partners
+            ).map(([code, partner]) => ({
+                code,
+                partnerId: partner.partnerId,
+                partnerName: partner.partnerName,
+                active: partner.active,
+                paidReservations: 0,
+                commissionPendingUsd: 0,
+                commissionPaidUsd: 0
+            }));
+
+            const partnerMap = new Map(
+                partners.map(partner => [partner.code, partner])
+            );
+
+            const reservations = [];
+
+            for (const transaction of transactions) {
+                const code = transaction.promo?.code;
+                const partner = partnerMap.get(code);
+
+                if (!partner) continue;
+
+                const isPaid =
+                    transaction.status === "PAID" &&
+                    transaction.payment?.status === "PAID";
+
+                // Une commission n'est acquise qu'après paiement.
+                if (!isPaid) continue;
+
+                const commission = Number(
+                    transaction.promo?.commissionAmount || 0
+                );
+
+                const commissionStatus =
+                    transaction.promo?.commissionStatus === "PAID"
+                        ? "PAID"
+                        : "PENDING";
+
+                partner.paidReservations += 1;
+
+                if (commissionStatus === "PAID") {
+                    partner.commissionPaidUsd += commission;
+                } else {
+                    partner.commissionPendingUsd += commission;
+                }
+
+                reservations.push({
+                    transactionId: transaction.transactionId,
+                    date: transaction.createdAt,
+                    client: transaction.customer?.fullName || "",
+                    email: transaction.customer?.email || "",
+                    code,
+                    partnerName: partner.partnerName,
+                    paymentMethod: transaction.payment?.method || "",
+                    paymentAmount: transaction.payment?.amount || 0,
+                    paymentCurrency: transaction.payment?.currency || "",
+                    commissionAmount: commission,
+                    commissionCurrency:
+                        transaction.promo?.commissionCurrency || "USD",
+                    commissionStatus
+                });
+            }
+
+            for (const partner of partners) {
+                partner.commissionPendingUsd = Number(
+                    partner.commissionPendingUsd.toFixed(2)
+                );
+
+                partner.commissionPaidUsd = Number(
+                    partner.commissionPaidUsd.toFixed(2)
+                );
+
+                partner.commissionTotalUsd = Number(
+                    (
+                        partner.commissionPendingUsd +
+                        partner.commissionPaidUsd
+                    ).toFixed(2)
+                );
+            }
+
+            reservations.sort(
+                (a, b) =>
+                    new Date(b.date || 0) - new Date(a.date || 0)
+            );
+
+            const summary = {
+                totalPaidReservations: reservations.length,
+                totalPendingUsd: Number(
+                    partners.reduce(
+                        (sum, p) => sum + p.commissionPendingUsd,
+                        0
+                    ).toFixed(2)
+                ),
+                totalPaidUsd: Number(
+                    partners.reduce(
+                        (sum, p) => sum + p.commissionPaidUsd,
+                        0
+                    ).toFixed(2)
+                )
+            };
+
+            res.set("Cache-Control", "no-store");
+
+            return res.json({
+                success: true,
+                summary,
+                partners,
+                reservations: reservations.slice(0, 100)
+            });
+
+        } catch (error) {
+            console.error(
+                "❌ HOTEL PARTNER COMMISSIONS ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                error: "Impossible de récupérer les commissions partenaires"
+            });
+        }
+    }
+);
+
 
 // ============================================================
 // 🏨 STATUT TRANSACTION HÔTEL
