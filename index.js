@@ -308,6 +308,10 @@ async function createHotelTransaction(
 
         status:
             HOTEL_TRANSACTION_STATUS.PAYMENT_PENDING,
+                    // PROMOTION ET COMMISSION PARTENAIRE
+        promo: data.promo || null,
+
+        pricing: data.pricing || null,
 
        payment: {
     status: "PENDING",
@@ -572,6 +576,144 @@ const HOTEL_STRIPE_PRICE = 1500; // USD 15
 
 const HOTEL_PAYTECH_PRICE = 8333.3; // XOF 8500 — valeur de test
 
+
+// ============================================================
+// TOURIZIA — CODES PROMO PARTENAIRES HÔTELS
+// ============================================================
+
+const HOTEL_PROMO_CONFIG = {
+    discountPercent: 5,
+    commissionUsd: 2,
+
+    partners: {
+        TOURIZIA01: {
+            partnerId: "PARTNER_01",
+            partnerName: "Partenaire 1",
+            active: true
+        },
+
+        TOURIZIA02: {
+            partnerId: "PARTNER_02",
+            partnerName: "Partenaire 2",
+            active: true
+        },
+
+        TOURIZIA03: {
+            partnerId: "PARTNER_03",
+            partnerName: "Partenaire 3",
+            active: true
+        },
+
+        TOURIZIA04: {
+            partnerId: "PARTNER_04",
+            partnerName: "Partenaire 4",
+            active: true
+        }
+    }
+};
+
+
+// ============================================================
+// CALCUL DU PRIX HÔTEL AVEC CODE PROMO
+// ============================================================
+
+function calculateHotelPromo(data, totalPersons, paymentMethod) {
+
+    const code = String(data.promoCode || "")
+        .trim()
+        .toUpperCase();
+
+    const baseStripeUnit = HOTEL_STRIPE_PRICE;
+
+    const basePaytechTotal = Math.round(
+        HOTEL_PAYTECH_PRICE * totalPersons
+    );
+
+    // Aucun code promo
+    if (!code) {
+        return {
+            promo: null,
+
+            pricing: {
+                persons: totalPersons,
+                currency: paymentMethod === "stripe" ? "USD" : "XOF",
+                discountPercent: 0,
+                discountAmount: 0,
+                baseAmount: paymentMethod === "stripe"
+                    ? (baseStripeUnit * totalPersons) / 100
+                    : basePaytechTotal,
+                totalAmount: paymentMethod === "stripe"
+                    ? (baseStripeUnit * totalPersons) / 100
+                    : basePaytechTotal
+            },
+
+            stripeUnitAmount: baseStripeUnit,
+            paytechTotalAmount: basePaytechTotal
+        };
+    }
+
+    const partner = HOTEL_PROMO_CONFIG.partners[code];
+
+    if (!partner || !partner.active) {
+        throw new Error("Ce code promo est invalide ou désactivé.");
+    }
+
+    const discountPercent = HOTEL_PROMO_CONFIG.discountPercent;
+
+    const stripeDiscountedUnit = Math.round(
+        baseStripeUnit * (1 - discountPercent / 100)
+    );
+
+    const stripeBaseTotal = baseStripeUnit * totalPersons;
+    const stripeDiscountedTotal = stripeDiscountedUnit * totalPersons;
+
+    const paytechDiscountedTotal = Math.round(
+        HOTEL_PAYTECH_PRICE *
+        totalPersons *
+        (1 - discountPercent / 100)
+    );
+
+    const isStripe = paymentMethod === "stripe";
+
+    const baseAmount = isStripe
+        ? stripeBaseTotal / 100
+        : basePaytechTotal;
+
+    const totalAmount = isStripe
+        ? stripeDiscountedTotal / 100
+        : paytechDiscountedTotal;
+
+    return {
+        promo: {
+            code,
+            partnerId: partner.partnerId,
+            partnerName: partner.partnerName,
+
+            discountPercent,
+
+            commissionAmount: HOTEL_PROMO_CONFIG.commissionUsd,
+            commissionCurrency: "USD",
+            commissionStatus: "PENDING",
+            commissionPaidAt: null
+        },
+
+        pricing: {
+            persons: totalPersons,
+            currency: isStripe ? "USD" : "XOF",
+            discountPercent,
+            baseAmount,
+            discountAmount: Number(
+                (baseAmount - totalAmount).toFixed(2)
+            ),
+            totalAmount
+        },
+
+        stripeUnitAmount: stripeDiscountedUnit,
+        paytechTotalAmount: paytechDiscountedTotal
+    };
+}
+
+
 // ============================================================
 // OFFRES HÔTEL EN ATTENTE DE PAIEMENT STRIPE
 // ============================================================
@@ -835,12 +977,19 @@ console.log(
 // 🔐 3C.7 — VÉRIFICATION DU MONTANT STRIPE
 // ==================================================
 
+
 const expectedPersons =
     Number(existingTransaction.request?.adults || 0) +
     Number(existingTransaction.request?.children || 0);
 
+// Le montant enregistré lors de la création du paiement
+// est la référence, remise comprise.
 const expectedAmountCents =
-    HOTEL_STRIPE_PRICE * expectedPersons;
+    existingTransaction.pricing?.currency === "USD"
+        ? Math.round(
+            Number(existingTransaction.pricing.totalAmount) * 100
+          )
+        : HOTEL_STRIPE_PRICE * expectedPersons;
 
 const receivedAmountCents =
     Number(session.amount_total);
@@ -873,6 +1022,7 @@ console.log("✅ STRIPE : MONTANT ET DEVISE VÉRIFIÉS", {
     receivedAmountCents,
     currency: receivedCurrency
 });
+
 
         // ----------------------------------------------------
 // 💰 TRANSACTION → PAID
@@ -1207,6 +1357,71 @@ console.log(
 // ============================================================
 
 app.use(express.json());
+
+
+// ============================================================
+// 🎟️ TOURIZIA — VÉRIFICATION PUBLIQUE DU CODE PROMO HÔTEL
+// ============================================================
+
+app.post("/api/hotel/promo/validate", (req, res) => {
+    try {
+        const data = req.body || {};
+
+        const adults = Number(data.adults || 0);
+        const children = Number(data.children || 0);
+        const totalPersons = adults + children;
+
+        if (
+            !Number.isInteger(adults) ||
+            !Number.isInteger(children) ||
+            adults < 0 ||
+            children < 0 ||
+            totalPersons < 1
+        ) {
+            return res.status(400).json({
+                success: false,
+                error: "Nombre de voyageurs invalide."
+            });
+        }
+
+        const paymentMethod =
+            String(data.paymentMethod || "stripe").toLowerCase();
+
+        if (!["stripe", "paytech"].includes(paymentMethod)) {
+            return res.status(400).json({
+                success: false,
+                error: "Mode de paiement invalide."
+            });
+        }
+
+        const promoResult = calculateHotelPromo(
+            {
+                promoCode: data.promoCode
+            },
+            totalPersons,
+            paymentMethod
+        );
+
+        return res.json({
+            success: true,
+            valid: Boolean(promoResult.promo),
+            promoCode: promoResult.promo?.code || null,
+            partnerName: promoResult.promo?.partnerName || null,
+            pricing: promoResult.pricing,
+            message: promoResult.promo
+                ? "Code promo valide. Réduction appliquée."
+                : "Aucun code promo appliqué."
+        });
+
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            valid: false,
+            error: error.message || "Impossible de vérifier ce code promo."
+        });
+    }
+});
+
 
 // ============================================================
 // 🔐 TOURIZIA — AUTHENTIFICATION ADMINISTRATEUR
@@ -6572,6 +6787,36 @@ app.post(
         });
       }
 
+      // ========================================================
+      // 🎟️ CALCUL PROMO — STRIPE HÔTEL
+      // ========================================================
+
+      let promoResult;
+
+      try {
+        promoResult = calculateHotelPromo(
+          data,
+          totalPersons,
+          "stripe"
+        );
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          error: error.message
+        });
+      }
+
+      // Données calculées exclusivement par le backend
+      data.promo = promoResult.promo;
+      data.pricing = promoResult.pricing;
+
+      console.log("🎟️ HOTEL PROMO STRIPE:", {
+        code: data.promo?.code || "AUCUN",
+        discount: data.pricing.discountAmount,
+        total: data.pricing.totalAmount
+      });
+
+
       // --------------------------------------------------------
       // 🛡️ VÉRIFIER LES VOYAGEURS
       // --------------------------------------------------------
@@ -6676,8 +6921,8 @@ app.post(
                     `${data.city} | ${data.checkIn} → ${data.checkOut}`
                 },
 
-                unit_amount:
-                  HOTEL_STRIPE_PRICE
+               unit_amount:
+    promoResult.stripeUnitAmount
               },
 
               quantity:
@@ -6738,7 +6983,11 @@ cancel_url:
               data.guestNationality || "SN",
 
             offerToken:
-              offerToken
+              offerToken, 
+              promoCode: data.promo?.code || "",
+partnerId: data.promo?.partnerId || "",
+partnerName: data.promo?.partnerName || "",
+discountPercent: String(data.promo?.discountPercent || 0)
           }
         });
 
@@ -6847,8 +7096,39 @@ if (totalPersons < 1) {
     });
 
 }
-const totalPaytechAmount =
-    HOTEL_PAYTECH_PRICE * totalPersons;
+
+    // ========================================================
+    // 🎟️ CALCUL PROMO — PAYTECH HÔTEL
+    // ========================================================
+
+    let promoResult;
+
+    try {
+        promoResult = calculateHotelPromo(
+            data,
+            totalPersons,
+            "paytech"
+        );
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            error: error.message
+        });
+    }
+
+    data.promo = promoResult.promo;
+    data.pricing = promoResult.pricing;
+
+    const totalPaytechAmount =
+        promoResult.paytechTotalAmount;
+
+    console.log("🎟️ HOTEL PROMO PAYTECH:", {
+        code: data.promo?.code || "AUCUN",
+        discount: data.pricing.discountAmount,
+        total: totalPaytechAmount,
+        currency: "XOF"
+    });
+
 
     console.log(
       `🏨 Création paiement PayTech hôtel — ${targetPayment}`
@@ -6907,6 +7187,10 @@ totalPersons:
     totalPersons,
       guestNationality:
         data.guestNationality || "SN",
+        promoCode: data.promo?.code || "",
+partnerId: data.promo?.partnerId || "",
+partnerName: data.promo?.partnerName || "",
+discountPercent: data.promo?.discountPercent || 0
 
     };
     transactionPromise =
@@ -7406,7 +7690,9 @@ const expectedPersons =
     Number(existingTransaction.request?.children || 0);
 
 const expectedAmount =
-    HOTEL_PAYTECH_PRICE * expectedPersons;
+    existingTransaction.pricing?.currency === "XOF"
+        ? Number(existingTransaction.pricing.totalAmount)
+        : HOTEL_PAYTECH_PRICE * expectedPersons;
 
 const receivedAmount =
     Number(final_item_price ?? item_price);
