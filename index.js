@@ -2534,9 +2534,15 @@ app.get(
                     paymentAmount: transaction.payment?.amount || 0,
                     paymentCurrency: transaction.payment?.currency || "",
                     commissionAmount: commission,
-                    commissionCurrency:
-                        transaction.promo?.commissionCurrency || "USD",
-                    commissionStatus
+                   
+commissionCurrency:
+    transaction.promo?.commissionCurrency || "USD",
+
+commissionStatus,
+
+commissionPaidAt:
+    transaction.promo?.commissionPaidAt || null
+
                 });
             }
 
@@ -2600,6 +2606,137 @@ app.get(
         }
     }
 );
+
+
+// ============================================================
+// 🤝 ADMIN — RÉGLER UNE COMMISSION PARTENAIRE HÔTEL
+// ============================================================
+
+app.post(
+    "/api/admin/hotel-partner-commissions/:transactionId/pay",
+    requireAdmin,
+    async (req, res) => {
+        try {
+            if (!hotelTransactions) {
+                return res.status(503).json({
+                    success: false,
+                    error: "MongoDB indisponible"
+                });
+            }
+
+            const transactionId = String(
+                req.params.transactionId || ""
+            ).trim();
+
+            if (
+                !transactionId ||
+                !/^[A-Za-z0-9_-]{5,100}$/.test(transactionId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Identifiant de transaction invalide"
+                });
+            }
+
+            const now = new Date();
+
+            // Transition atomique :
+            // seule une commission en attente et liée
+            // à un paiement client confirmé peut être réglée.
+            const result = await hotelTransactions.updateOne(
+                {
+                    transactionId,
+                    type: "hotel",
+                    "payment.status": "PAID",
+                    "promo.code": {
+                        $exists: true,
+                        $nin: [null, ""]
+                    },
+                    "promo.commissionStatus": "PENDING"
+                },
+                {
+                    $set: {
+                        "promo.commissionStatus": "PAID",
+                        "promo.commissionPaidAt": now,
+                        updatedAt: now
+                    },
+                    $push: {
+                        history: {
+                            status: "PARTNER_COMMISSION_PAID",
+                            at: now
+                        }
+                    }
+                }
+            );
+
+            if (result.modifiedCount !== 1) {
+                const existing = await hotelTransactions.findOne({
+                    transactionId,
+                    type: "hotel"
+                });
+
+                if (!existing) {
+                    return res.status(404).json({
+                        success: false,
+                        error: "Transaction hôtel introuvable"
+                    });
+                }
+
+                if (existing.payment?.status !== "PAID") {
+                    return res.status(409).json({
+                        success: false,
+                        error: "Le paiement du client n'est pas confirmé"
+                    });
+                }
+
+                if (!existing.promo?.code) {
+                    return res.status(409).json({
+                        success: false,
+                        error: "Aucun code partenaire sur cette réservation"
+                    });
+                }
+
+                if (existing.promo?.commissionStatus === "PAID") {
+                    return res.status(409).json({
+                        success: false,
+                        error: "Cette commission a déjà été réglée"
+                    });
+                }
+
+                return res.status(409).json({
+                    success: false,
+                    error: "Cette commission ne peut pas être réglée dans son état actuel"
+                });
+            }
+
+            console.log("✅ COMMISSION PARTENAIRE RÉGLÉE :", {
+                transactionId,
+                commission: "promo.commissionAmount",
+                date: now
+            });
+
+            return res.json({
+                success: true,
+                message: "Commission partenaire marquée comme réglée",
+                transactionId,
+                commissionStatus: "PAID",
+                commissionPaidAt: now
+            });
+
+        } catch (error) {
+            console.error(
+                "❌ ERREUR RÈGLEMENT COMMISSION PARTENAIRE :",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                error: "Impossible de régler cette commission"
+            });
+        }
+    }
+);
+
 
 
 // ============================================================
