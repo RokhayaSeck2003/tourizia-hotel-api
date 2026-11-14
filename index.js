@@ -2501,8 +2501,7 @@ app.get(
                 if (!partner) continue;
 
                 const isPaid =
-                    transaction.status === "PAID" &&
-                    transaction.payment?.status === "PAID";
+    transaction.payment?.status === "PAID";
 
                 // Une commission n'est acquise qu'après paiement.
                 if (!isPaid) continue;
