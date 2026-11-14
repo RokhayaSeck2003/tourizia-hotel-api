@@ -4497,7 +4497,8 @@ app.post("/api/select-hotel-offer", async (req, res) => {
 
 app.post("/api/prebook-selected-hotel", async (req, res) => {
     let transactionId = null;
-    let prebookClaimed = false;
+let prebookClaimed = false;
+let prebookProviderSucceeded = false;
 
     try {
         transactionId = req.body?.transactionId;
@@ -4609,6 +4610,8 @@ app.post("/api/prebook-selected-hotel", async (req, res) => {
         );
 
         const prebook = await prebookHotelOffer(offerId);
+
+prebookProviderSucceeded = true;
 
         const prebookData = prebook?.data || prebook;
 
@@ -4730,59 +4733,138 @@ const prebookTime = new Date();
                 "Offre sélectionnée et PREBOOK validé par LiteAPI. Aucune réservation définitive n'a encore été effectuée."
         });
 
-    } catch (error) {
+        } catch (error) {
+
         console.error(
             "❌ 3D.4 PREBOOK ERROR:",
             transactionId,
             error
         );
 
-        // Si le PREBOOK échoue, permettre une nouvelle tentative.
-        if (prebookClaimed && transactionId && hotelTransactions) {
+        const prebookOutcomeUnknown =
+            Boolean(
+                error.prebookOutcomeUnknown ||
+                prebookProviderSucceeded
+            );
+
+        let retryAllowed = false;
+
+        if (
+            prebookClaimed &&
+            transactionId &&
+            hotelTransactions
+        ) {
+
             try {
+
                 const resetTime = new Date();
 
-                await hotelTransactions.updateOne(
-                    {
-                        transactionId,
-                        type: "hotel",
-                        status: HOTEL_TRANSACTION_STATUS.PREBOOKING
-                    },
-                    {
-                        $set: {
-                            status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
-                            updatedAt: resetTime,
-                            error: {
-                                step: "PREBOOK",
-                                message: error.message,
-                                at: resetTime
-                            }
+                if (prebookOutcomeUnknown) {
+
+                    // Résultat incertain : conserver PREBOOKING.
+                    // Aucune nouvelle tentative automatique.
+
+                    await hotelTransactions.updateOne(
+                        {
+                            transactionId,
+                            type: "hotel",
+                            status: HOTEL_TRANSACTION_STATUS.PREBOOKING
                         },
-                        $push: {
-                            history: {
-                                status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
-                                at: resetTime,
-                                reason: "PREBOOK_FAILED"
+                        {
+                            $set: {
+                                updatedAt: resetTime,
+                                "provider.prebookStatus": "UNKNOWN",
+                                error: {
+                                    step: "PREBOOK",
+                                    status: "UNKNOWN",
+                                    message: String(
+                                        error.message || error
+                                    ),
+                                    at: resetTime
+                                }
+                            },
+                            $push: {
+                                history: {
+                                    status: HOTEL_TRANSACTION_STATUS.PREBOOKING,
+                                    at: resetTime,
+                                    reason: "PREBOOK_OUTCOME_UNKNOWN"
+                                }
                             }
                         }
-                    }
-                );
+                    );
+
+                    console.error(
+                        "🚨 PREBOOK À VÉRIFIER MANUELLEMENT:",
+                        transactionId
+                    );
+
+                } else {
+
+                    // Refus certain : autoriser une nouvelle tentative.
+
+                    const reset = await hotelTransactions.updateOne(
+                        {
+                            transactionId,
+                            type: "hotel",
+                            status: HOTEL_TRANSACTION_STATUS.PREBOOKING
+                        },
+                        {
+                            $set: {
+                                status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
+                                updatedAt: resetTime,
+                                error: {
+                                    step: "PREBOOK",
+                                    status: "FAILED",
+                                    message: String(
+                                        error.message || error
+                                    ),
+                                    at: resetTime
+                                }
+                            },
+                            $push: {
+                                history: {
+                                    status: HOTEL_TRANSACTION_STATUS.OFFER_SELECTED,
+                                    at: resetTime,
+                                    reason: "PREBOOK_FAILED"
+                                }
+                            }
+                        }
+                    );
+
+                    retryAllowed = reset.modifiedCount === 1;
+                }
+
             } catch (resetError) {
+
                 console.error(
-                    "❌ IMPOSSIBLE DE RÉTABLIR OFFER_SELECTED:",
+                    "❌ IMPOSSIBLE DE METTRE À JOUR LE STATUT PREBOOK:",
                     resetError
                 );
+
+                // En cas de doute, ne jamais autoriser
+                // une nouvelle tentative automatique.
+                retryAllowed = false;
             }
         }
 
-        return res.status(500).json({
+        return res.status(
+            prebookOutcomeUnknown ? 202 : 500
+        ).json({
             success: false,
-            error: "Le PREBOOK de l'offre sélectionnée a échoué",
-            message: error.message,
-            retryAllowed: prebookClaimed
+            status: prebookOutcomeUnknown
+                ? "PREBOOK_UNKNOWN"
+                : "PREBOOK_FAILED",
+            error: prebookOutcomeUnknown
+                ? "Le résultat du PREBOOK doit être vérifié auprès de LiteAPI avant toute nouvelle tentative."
+                : "Le PREBOOK de l'offre sélectionnée a échoué.",
+            message: String(
+                error.message || error
+            ),
+            retryAllowed
         });
     }
 });
+
 // ============================================================
 // 🏨 BOOK DÉFINITIF — OFFRE DÉJÀ PREBOOKÉE
 // ============================================================
@@ -4895,9 +4977,14 @@ app.post("/api/book-selected-hotel", async (req, res) => {
             },
             {
                 $set: {
-                    status: HOTEL_TRANSACTION_STATUS.BOOKING,
-                    updatedAt: claimTime
-                },
+    status: HOTEL_TRANSACTION_STATUS.BOOKING,
+    updatedAt: claimTime,
+
+    bookingStartedAt: claimTime,
+
+    "provider.clientReference": transactionId,
+    "provider.bookAttemptPrebookId": prebookId
+},
                 $push: {
                     history: {
                         status: HOTEL_TRANSACTION_STATUS.BOOKING,
@@ -4928,6 +5015,7 @@ app.post("/api/book-selected-hotel", async (req, res) => {
         }
 
         const bookingData = {
+            transactionId,
             fullName: customer.fullName,
             email: customer.email,
             phone: customer.phone || "",
@@ -5348,78 +5436,123 @@ console.log("📅 CONDITIONS D'ANNULATION POUR CONFIRMATION:", {
 // PREBOOK D'UNE OFFRE LITEAPI
 // ============================================================
 
+
 async function prebookHotelOffer(offerId) {
 
     if (!offerId) {
-
-        throw new Error(
-            "offerId LiteAPI manquant"
-        );
-
+        throw new Error("offerId LiteAPI manquant");
     }
+
+    const configuredTimeout = Number(
+        process.env.LITEAPI_PREBOOK_TIMEOUT_MS
+    );
+
+    const timeoutMs =
+        Number.isFinite(configuredTimeout) && configuredTimeout >= 1000
+            ? configuredTimeout
+            : 20000;
 
     console.log(
         "🔐 LITEAPI PREBOOK:",
         offerId
     );
 
-    const response =
-        await fetch(
+    console.log(
+        "⏱️ PREBOOK TIMEOUT:",
+        timeoutMs,
+        "ms"
+    );
+
+    let response;
+
+    // 1. Appel LiteAPI avec délai maximal.
+    try {
+
+        response = await fetch(
             `${LITEAPI_BOOKING_URL}/rates/prebook`,
             {
                 method: "POST",
 
                 headers: {
                     ...liteApiHeaders,
-                    "Content-Type":
-                        "application/json"
+                    "Content-Type": "application/json"
                 },
 
                 body: JSON.stringify({
-
                     offerId,
-
-                    /*
-                     * false = paiement géré
-                     * directement côté backend.
-                     *
-                     * Le mode Payment SDK
-                     * n'est pas utilisé ici.
-                     */
                     usePaymentSdk: false
+                }),
 
-                })
+                signal: AbortSignal.timeout(timeoutMs)
             }
         );
 
-    const result =
-        await response.json();
+    } catch (error) {
+
+        // Une coupure réseau ou un timeout
+        // ne prouve pas que LiteAPI n'a rien exécuté.
+
+        error.prebookOutcomeUnknown = true;
+
+        console.error(
+            "⚠️ PREBOOK RÉSULTAT INCERTAIN:",
+            error.message
+        );
+
+        throw error;
+    }
+
+    // 2. Lire la réponse LiteAPI.
+    let result;
+
+    try {
+
+        result = await response.json();
+
+    } catch (error) {
+
+        error.prebookOutcomeUnknown = true;
+
+        error.message =
+            "Réponse LiteAPI PREBOOK illisible : " +
+            error.message;
+
+        throw error;
+    }
 
     console.log(
         "🔐 PREBOOK STATUS:",
         response.status
     );
 
+    // 3. Distinguer un refus explicite
+    // d'une erreur serveur potentiellement ambiguë.
     if (!response.ok) {
 
         console.error(
             "❌ PREBOOK ERROR:",
-            JSON.stringify(
-                result,
-                null,
-                2
-            )
+            JSON.stringify(result, null, 2)
         );
 
-       const errorMessage =
-    result.error?.description ||
-    result.error?.message ||
-    result.message ||
-    (typeof result.error === "string" ? result.error : null) ||
-    JSON.stringify(result.error || result) ||
-    "Impossible de pré-réserver cette offre";
+        const errorMessage =
+            result.error?.description ||
+            result.error?.message ||
+            result.message ||
+            (typeof result.error === "string"
+                ? result.error
+                : null) ||
+            JSON.stringify(result.error || result) ||
+            "Impossible de pré-réserver cette offre";
 
-throw new Error(errorMessage);
+        const error = new Error(errorMessage);
+
+        // 408 et erreurs serveur :
+        // résultat potentiellement incertain.
+        error.prebookOutcomeUnknown =
+            response.status === 408 ||
+            response.status >= 500;
+
+        throw error;
     }
 
     console.log(
@@ -5427,8 +5560,8 @@ throw new Error(errorMessage);
     );
 
     return result;
-
 }
+
 // ============================================================
 // true  → offre acceptable pour Tourizia
 // false → offre non acceptable pour Tourizia
@@ -7680,9 +7813,15 @@ for (
     // CLIENT REFERENCE
     // --------------------------------------------------------
 
-    const clientReference =
-        data.paymentId ||
-        hotelNumber();
+    const clientReference = String(
+    data.transactionId || ""
+).trim();
+
+if (!clientReference) {
+    throw new Error(
+        "transactionId manquant pour sécuriser le BOOK LiteAPI."
+    );
+}
 
     // --------------------------------------------------------
     // BODY BOOK
@@ -7732,28 +7871,68 @@ for (
     // APPEL BOOK
     // --------------------------------------------------------
 
-    const response =
-        await fetch(
+   
+    const configuredTimeout = Number(
+        process.env.LITEAPI_BOOK_TIMEOUT_MS
+    );
+
+    const timeoutMs =
+        Number.isFinite(configuredTimeout) && configuredTimeout >= 1000
+            ? configuredTimeout
+            : 30000;
+
+    console.log(
+        "⏱️ LITEAPI BOOK TIMEOUT:",
+        timeoutMs,
+        "ms"
+    );
+
+    let response;
+
+    try {
+
+        response = await fetch(
             `${LITEAPI_BOOKING_URL}/rates/book`,
             {
                 method: "POST",
 
                 headers: {
                     ...liteApiHeaders,
-                    "Content-Type":
-                        "application/json"
+                    "Content-Type": "application/json"
                 },
 
-                body:
-                    JSON.stringify(
-                        requestBody
-                    )
+                body: JSON.stringify(requestBody),
 
+                signal: AbortSignal.timeout(timeoutMs)
             }
         );
 
-    const result =
-        await response.json();
+    } catch (error) {
+
+        console.error(
+            "🚨 LITEAPI BOOK — CONNEXION OU TIMEOUT:",
+            error.message
+        );
+
+        throw error;
+    }
+
+    let result;
+
+    try {
+
+        result = await response.json();
+
+    } catch (error) {
+
+        console.error(
+            "🚨 LITEAPI BOOK — RÉPONSE ILLISIBLE:",
+            error.message
+        );
+
+        throw error;
+    }
+
 
     console.log(
         "🏨 LITEAPI BOOK STATUS:",
@@ -12482,6 +12661,517 @@ async function sendToTouriziaDashboard(data) {
     }
 }
 
+// ============================================================
+// 🔎 TOURIZIA — RECHERCHER UN BOOK PAR CLIENT REFERENCE
+// Lecture seule : aucun BOOK ne sera déclenché.
+// ============================================================
+
+async function findLiteApiBookingByClientReference(transactionId) {
+
+    const clientReference = String(transactionId || "").trim();
+
+    if (!clientReference) {
+        throw new Error("clientReference manquant.");
+    }
+
+    const url = new URL(
+        `${LITEAPI_BOOKING_URL}/bookings`
+    );
+
+    url.searchParams.set("clientReference", clientReference);
+
+    const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: liteApiHeaders,
+        signal: AbortSignal.timeout(10000)
+    });
+
+    if (!response.ok) {
+        throw new Error(
+            `LiteAPI LIST BOOKINGS HTTP ${response.status}`
+        );
+    }
+
+    const result = await response.json();
+
+    const bookings = Array.isArray(result?.data)
+        ? result.data
+        : [];
+
+    // Correspondance stricte avec notre transaction Tourizia.
+    const matches = bookings.filter(
+        booking =>
+            String(booking.clientReference || "").trim() ===
+            clientReference
+    );
+
+    if (matches.length === 0) {
+        return null;
+    }
+
+    // Plusieurs résultats : ne surtout pas choisir au hasard.
+    if (matches.length > 1) {
+        throw new Error(
+            `Plusieurs réservations LiteAPI trouvées pour ${clientReference}. Vérification manuelle nécessaire.`
+        );
+    }
+
+    const bookingId = matches[0].bookingId;
+
+    if (!bookingId) {
+        throw new Error(
+            "LiteAPI a retourné une réservation sans bookingId."
+        );
+    }
+
+    // Récupérer les détails complets de cette réservation.
+    const detailsResponse = await fetch(
+        `${LITEAPI_BOOKING_URL}/bookings/${encodeURIComponent(bookingId)}`,
+        {
+            method: "GET",
+            headers: liteApiHeaders,
+            signal: AbortSignal.timeout(10000)
+        }
+    );
+
+    if (!detailsResponse.ok) {
+        throw new Error(
+            `LiteAPI GET BOOKING HTTP ${detailsResponse.status}`
+        );
+    }
+
+    const detailsResult = await detailsResponse.json();
+
+    const booking =
+        detailsResult?.data ||
+        detailsResult?.booking ||
+        detailsResult;
+
+    // Deuxième vérification stricte avant de retourner le résultat.
+    if (
+        String(booking?.clientReference || "").trim() !==
+        clientReference
+    ) {
+        throw new Error(
+            "La référence client retournée par LiteAPI ne correspond pas à la transaction Tourizia."
+        );
+    }
+
+    return booking;
+}
+
+// ============================================================
+// 🔐 TOURIZIA — RÉCUPÉRATION DES BOOK INTERROMPUS
+// ============================================================
+
+const HOTEL_BOOKING_RECOVERY_INTERVAL = 60 * 1000;
+const HOTEL_BOOKING_STALE_TIMEOUT = 5 * 60 * 1000;
+
+let hotelBookingRecoveryRunning = false;
+
+async function recoverInterruptedHotelBookings() {
+
+    if (!hotelTransactions || hotelBookingRecoveryRunning) {
+        return;
+    }
+
+    hotelBookingRecoveryRunning = true;
+
+    try {
+
+        const now = new Date();
+
+        const staleBefore = new Date(
+            now.getTime() - HOTEL_BOOKING_STALE_TIMEOUT
+        );
+
+        const recovery = await hotelTransactions.updateMany(
+            {
+                type: "hotel",
+
+                status: HOTEL_TRANSACTION_STATUS.BOOKING,
+
+                $or: [
+                    {
+                        bookingStartedAt: {
+                            $lte: staleBefore
+                        }
+                    },
+                    {
+                        bookingStartedAt: {
+                            $exists: false
+                        },
+                        updatedAt: {
+                            $lte: staleBefore
+                        }
+                    }
+                ]
+            },
+            {
+                $set: {
+                    status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN,
+                    updatedAt: now,
+
+                    error:
+                        "BOOK interrompu ou délai dépassé. Vérification LiteAPI obligatoire avant toute nouvelle tentative.",
+
+                    "bookingRecovery.required": true,
+                    "bookingRecovery.detectedAt": now,
+                    "bookingRecovery.status": "PENDING"
+                },
+
+                $push: {
+                    history: {
+                        status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN,
+                        at: now,
+                        reason: "INTERRUPTED_BOOK_RECOVERY"
+                    }
+                }
+            }
+        );
+
+        if (recovery.modifiedCount > 0) {
+
+            console.warn(
+                "⚠️ BOOK INTERROMPUS DÉTECTÉS:",
+                recovery.modifiedCount
+            );
+
+        }
+        
+        // ========================================================
+        // 🔎 RÉCONCILIATION DES BOOKING_UNKNOWN AVEC LITEAPI
+        // ========================================================
+
+        const unknownBookings = await hotelTransactions
+            .find({
+                type: "hotel",
+                status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN,
+                "bookingRecovery.required": true,
+                "bookingRecovery.status": "PENDING"
+            })
+            .limit(20)
+            .toArray();
+
+        for (const transaction of unknownBookings) {
+
+            const transactionId = transaction.transactionId;
+
+            try {
+
+                console.log(
+                    "🔎 VÉRIFICATION LITEAPI:",
+                    transactionId
+                );
+
+                const booking =
+                    await findLiteApiBookingByClientReference(
+                        transactionId
+                    );
+
+                // Aucune réservation retrouvée :
+                // on garde BOOKING_UNKNOWN et on réessaiera plus tard.
+                if (!booking) {
+
+                    await hotelTransactions.updateOne(
+                        {
+                            transactionId,
+                            status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN,
+                            "bookingRecovery.status": "PENDING"
+                        },
+                        {
+                            $inc: {
+                                "bookingRecovery.attempts": 1
+                            },
+                            $set: {
+                                "bookingRecovery.lastCheckedAt": new Date()
+                            }
+                        }
+                    );
+
+                    console.warn(
+                        "⏳ AUCUN BOOK TROUVÉ POUR:",
+                        transactionId
+                    );
+
+                    continue;
+                }
+
+                const providerStatus = String(
+                    booking.status || ""
+                ).trim().toUpperCase();
+
+                const bookingId = String(
+                    booking.bookingId || ""
+                ).trim();
+
+                // Ne confirmer que si LiteAPI confirme explicitement.
+                if (
+                    providerStatus !== "CONFIRMED" ||
+                    !bookingId
+                ) {
+
+                    await hotelTransactions.updateOne(
+                        {
+                            transactionId,
+                            status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN
+                        },
+                        {
+                            $set: {
+                                "bookingRecovery.status": "MANUAL_REVIEW",
+                                "bookingRecovery.lastCheckedAt": new Date(),
+                                "bookingRecovery.providerStatus": providerStatus,
+                                "bookingRecovery.bookingId": bookingId || null,
+                                updatedAt: new Date()
+                            }
+                        }
+                    );
+
+                    console.warn(
+                        "⚠️ BOOK LITEAPI À VÉRIFIER MANUELLEMENT:",
+                        transactionId,
+                        providerStatus
+                    );
+
+                    continue;
+                }
+
+                const confirmedAt = new Date();
+
+                const confirmationNumber =
+                    booking.hotelConfirmationCode ||
+                    booking.bookingId;
+
+                const confirmed = await hotelTransactions.updateOne(
+                    {
+                        transactionId,
+                        status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN,
+                        "bookingRecovery.status": "PENDING"
+                    },
+                    {
+                        $set: {
+                            status: HOTEL_TRANSACTION_STATUS.CONFIRMED,
+                            confirmedAt,
+                            updatedAt: confirmedAt,
+
+                            "provider.bookingId": bookingId,
+                            "provider.confirmationNumber": confirmationNumber,
+                            "provider.clientReference": transactionId,
+
+                            "provider.hotelName":
+                                booking.hotelName ||
+                                booking.hotel?.name ||
+                                transaction.provider?.hotelName ||
+                                "",
+
+                            "provider.hotelId":
+                                booking.hotel?.hotelId ||
+                                transaction.provider?.hotelId ||
+                                null,
+
+                            "provider.price":
+                                booking.price ??
+                                transaction.provider?.price ??
+                                null,
+
+                            "provider.currency":
+                                booking.currency ||
+                                transaction.provider?.currency ||
+                                null,
+
+                            "bookingRecovery.required": false,
+                            "bookingRecovery.status": "CONFIRMED",
+                            "bookingRecovery.confirmedAt": confirmedAt,
+                            "bookingRecovery.lastCheckedAt": confirmedAt
+                        },
+
+                        $push: {
+                            history: {
+                                status: HOTEL_TRANSACTION_STATUS.CONFIRMED,
+                                at: confirmedAt,
+                                reason: "RECOVERED_FROM_LITEAPI_CLIENT_REFERENCE"
+                            }
+                        },
+
+                        $unset: {
+                            error: ""
+                        }
+                    }
+                );
+
+               if (confirmed.modifiedCount === 1) {
+
+    const request = transaction.request || {};
+    const customer = transaction.customer || {};
+    const provider = transaction.provider || {};
+
+    const documentNow = new Date();
+
+    const bookingDocument = {
+        success: true,
+        transactionId,
+
+        paymentId:
+            transaction.payment?.paymentId ||
+            transaction.payment?.stripeSessionId ||
+            transactionId,
+
+        paymentMethod: transaction.payment?.method || "",
+
+        email: customer.email || "",
+        fullName: customer.fullName || "",
+        phone: customer.phone || "",
+
+        bookingId,
+        confirmationNumber,
+
+        hotelId: provider.hotelId || "",
+        hotelName:
+            booking.hotelName ||
+            booking.hotel?.name ||
+            provider.hotelName ||
+            "",
+
+        hotelAddress:
+            booking.hotelAddress ||
+            provider.hotelAddress ||
+            "",
+
+        hotelPhone: provider.hotelPhone || "",
+        hotelEmail: provider.hotelEmail || "",
+        hotelWebsite: provider.hotelWebsite || "",
+
+        roomName: provider.roomName || "",
+
+        city: request.city || "",
+        countryCode: request.countryCode || "",
+
+        checkIn: request.checkIn || "",
+        checkOut: request.checkOut || "",
+
+        adults: request.adults || 1,
+        children: request.children || 0,
+        rooms: request.rooms || 1,
+
+        guests: Array.isArray(request.guests)
+            ? request.guests
+            : [],
+
+        totalPersons:
+            Number(request.adults || 0) +
+            Number(request.children || 0),
+
+        providerPrice:
+            booking.price ??
+            provider.price ??
+            null,
+
+        providerCurrency:
+            booking.currency ||
+            provider.currency ||
+            "",
+
+        refundable: provider.refundable || null,
+        cancellationPolicies:
+            provider.cancellationPolicies || null
+    };
+
+    try {
+
+        await hotelDocumentJobs.updateOne(
+            { transactionId },
+            {
+                $setOnInsert: {
+                    transactionId,
+                    status: HOTEL_DOCUMENT_STATUS.PENDING,
+                    booking: bookingDocument,
+                    attempts: 0,
+                    nextAttemptAt: documentNow,
+                    createdAt: documentNow,
+                    updatedAt: documentNow,
+                    lockedAt: null,
+                    lastError: null
+                }
+            },
+            { upsert: true }
+        );
+
+        await hotelTransactions.updateOne(
+            { transactionId },
+            {
+                $set: {
+                    documentStatus: HOTEL_DOCUMENT_STATUS.PENDING,
+                    documentQueuedAt: documentNow,
+                    updatedAt: documentNow
+                }
+            }
+        );
+
+        console.log(
+            "📄 DOCUMENT RÉCUPÉRÉ MIS EN FILE:",
+            transactionId
+        );
+
+    } catch (documentError) {
+
+        console.error(
+            "❌ ERREUR DOCUMENT APRÈS RÉCUPÉRATION:",
+            transactionId,
+            documentError
+        );
+
+    }
+
+    console.log(
+        "✅ BOOK RÉCUPÉRÉ ET CONFIRMÉ:",
+        transactionId,
+        bookingId
+    );
+
+}
+
+            } catch (lookupError) {
+
+                console.error(
+                    "❌ LITEAPI RECOVERY ERROR:",
+                    transactionId,
+                    lookupError.message
+                );
+
+                await hotelTransactions.updateOne(
+                    {
+                        transactionId,
+                        status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN,
+                        "bookingRecovery.status": "PENDING"
+                    },
+                    {
+                        $inc: {
+                            "bookingRecovery.attempts": 1
+                        },
+                        $set: {
+                            "bookingRecovery.lastCheckedAt": new Date(),
+                            "bookingRecovery.lastError": lookupError.message
+                        }
+                    }
+                );
+
+            }
+        }
+
+
+    } catch (error) {
+
+        console.error(
+            "❌ BOOK RECOVERY ERROR:",
+            error
+        );
+
+    } finally {
+
+        hotelBookingRecoveryRunning = false;
+
+    }
+}
 
 // ============================================================
 // SERVER
@@ -12491,6 +13181,29 @@ async function sendToTouriziaDashboard(data) {
 async function startServer() {
 
     await connectMongoDB();
+
+    if (hotelTransactions) {
+
+        console.log(
+            "🔐 HOTEL BOOK RECOVERY ACTIVÉ"
+        );
+
+        // Vérification immédiate au démarrage.
+        await recoverInterruptedHotelBookings();
+
+        // Vérification périodique.
+        setInterval(
+            recoverInterruptedHotelBookings,
+            HOTEL_BOOKING_RECOVERY_INTERVAL
+        );
+
+    } else {
+
+        console.error(
+            "❌ BOOK RECOVERY NON ACTIVÉ : MongoDB indisponible"
+        );
+
+    }
 
     app.listen(PORT, "0.0.0.0", () => {
 
