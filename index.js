@@ -2820,6 +2820,42 @@ const liteApiHeaders = {
 };
 
 // ============================================================
+// TOURIZIA — APPELS LITEAPI AVEC TIMEOUT
+// ============================================================
+
+async function fetchLiteApi(url, options = {}, timeoutMs = 20000) {
+    const controller = new AbortController();
+
+    const timeout = setTimeout(() => {
+        controller.abort();
+    }, timeoutMs);
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+
+        return response;
+
+    } catch (error) {
+        if (error.name === "AbortError") {
+            const timeoutError = new Error(
+                `Délai LiteAPI dépassé après ${timeoutMs} ms`
+            );
+
+            timeoutError.code = "LITEAPI_TIMEOUT";
+            throw timeoutError;
+        }
+
+        throw error;
+
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+// ============================================================
 // 🌍 TOURIZIA — VILLES OFFICIELLES LITEAPI
 // ============================================================
 
@@ -3952,15 +3988,15 @@ if (data.hotelId) {
         )
     );
 
-    const response =
-    await fetch(
-        `${LITEAPI_BASE_URL}/hotels/rates`,
-        {
-            method: "POST",
-            headers: liteApiHeaders,
-            body: JSON.stringify(requestBody)
-        }
-    );
+    const response = await fetch(
+    `${LITEAPI_BASE_URL}/hotels/rates`,
+    {
+        method: "POST",
+        headers: liteApiHeaders,
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(20000)
+    }
+);
 
 const result =
     await response.json();
@@ -5879,50 +5915,59 @@ console.log("📅 CONDITIONS D'ANNULATION POUR CONFIRMATION:", {
         });
 
 
-    } catch (error) {
-        console.error(
-            "❌ BOOK DÉFINITIF ERROR:",
-            error
-        );
+   
+} catch (error) {
+    console.error(
+        "❌ BOOK DÉFINITIF ERROR:",
+        error
+    );
 
-        // En cas d'erreur pendant l'appel externe, on ne relance
-        // jamais automatiquement le BOOK : le résultat peut être ambigu.
-        if (bookingClaimed) {
-            try {
-                await hotelTransactions.updateOne(
-                    {
-                        transactionId,
-                        status: HOTEL_TRANSACTION_STATUS.BOOKING
+    if (bookingClaimed) {
+        try {
+            const now = new Date();
+
+            await hotelTransactions.updateOne(
+                {
+                    transactionId,
+                    status: HOTEL_TRANSACTION_STATUS.BOOKING
+                },
+                {
+                    $set: {
+                        status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN,
+                        updatedAt: now,
+                        error: String(error.message || error),
+
+                        "bookingRecovery.required": true,
+                        "bookingRecovery.status": "PENDING",
+                        "bookingRecovery.detectedAt": now
                     },
-                    {
-                        $set: {
+                    $push: {
+                        history: {
                             status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN,
-                            updatedAt: new Date(),
-                            error: String(error.message || error)
-                        },
-                        $push: {
-                            history: {
-                                status: HOTEL_TRANSACTION_STATUS.BOOKING_UNKNOWN,
-                                at: new Date()
-                            }
+                            at: now,
+                            reason: "BOOK_OUTCOME_UNKNOWN"
                         }
                     }
-                );
-            } catch (dbError) {
-                console.error(
-                    "❌ Impossible d'enregistrer BOOKING_UNKNOWN:",
-                    dbError
-                );
-            }
-        }
+                }
+            );
 
-        return res.status(202).json({
-            success: false,
-            status: "BOOKING_UNKNOWN",
-            error:
-                "Le résultat du BOOK doit être vérifié auprès de LiteAPI avant toute nouvelle tentative."
-        });
+            bookingClaimed = false;
+
+        } catch (dbError) {
+            console.error(
+                "❌ Impossible d'enregistrer BOOKING_UNKNOWN:",
+                dbError
+            );
+        }
     }
+
+    return res.status(202).json({
+        success: false,
+        status: "BOOKING_UNKNOWN",
+        error:
+            "Le résultat du BOOK doit être vérifié auprès de LiteAPI avant toute nouvelle tentative."
+    });
+}
 });
 
 // ============================================================
