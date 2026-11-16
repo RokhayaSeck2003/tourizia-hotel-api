@@ -4771,6 +4771,40 @@ return res.status(200).json({
             (offer, index) => formatPublicHotelOffer(offer, index)
         );
 
+        // ============================================================
+// 🔎 TOURIZIA — DIAGNOSTIC DES CONDITIONS D'ANNULATION
+// ============================================================
+
+console.log(
+    "🔎 DIAGNOSTIC ANNULATION — OFFRES PUBLIQUES:",
+    JSON.stringify(
+        publicOffers.slice(0, 5).map(offer => ({
+            hotel: offer.hotel?.name,
+            room: offer.room?.name,
+            price: offer.price,
+            currency: offer.currency,
+
+            cancellation: {
+                refundable: offer.cancellation?.refundable,
+                nonRefundable: offer.cancellation?.nonRefundable,
+
+                hasFreeCancellation:
+                    offer.cancellation?.hasFreeCancellation,
+
+                freeCancellationUntil:
+                    offer.cancellation?.freeCancellationUntil,
+
+                policyDetailsAvailable:
+                    offer.cancellation?.policyDetailsAvailable,
+
+                penalties:
+                    offer.cancellation?.penalties
+            }
+        })),
+        null,
+        2
+    )
+);
         console.log(
             "✅ OFFRES DISPONIBLES:",
             transactionId,
