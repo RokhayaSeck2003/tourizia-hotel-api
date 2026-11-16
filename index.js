@@ -13023,7 +13023,7 @@ app.get("/api/hotel-destinations", async (req, res) => {
         });
 
         // Limiter le nombre de suggestions affichées.
-        const finalDestinations = destinations.slice(0, 10);
+        const finalDestinations = destinations.slice(0, 30);
 
         if (geoNamesCache.size >= 500) {
             const oldestKey = geoNamesCache.keys().next().value;
