@@ -586,15 +586,15 @@ const HOTEL_PROMO_CONFIG = {
     commissionUsd: 2,
 
     partners: {
-        TOURIZIA01: {
+        YOONU_TUKKI: {
             partnerId: "PARTNER_01",
-            partnerName: "Partenaire 1",
+            partnerName: "Monsieur Seydina Alioune Diassine",
             active: true
         },
 
-        TOURIZIA02: {
+        WAGNU_INNA: {
             partnerId: "PARTNER_02",
-            partnerName: "Partenaire 2",
+            partnerName: "Madame Inna Cuisine",
             active: true
         },
 
@@ -3451,8 +3451,8 @@ function formatLiteApiHotelAddress(hotel = {}) {
 // 🛡️ DÉTAILS DES CONDITIONS D'ANNULATION LITEAPI
 // ============================================================
 
-function getOfferCancellationDetails(offer) {
 
+function getOfferCancellationDetails(offer) {
     const policies = offer.cancellationPolicies || {};
 
     const tag = String(
@@ -3468,28 +3468,43 @@ function getOfferCancellationDetails(offer) {
         : [];
 
     const penalties = infos.map(policy => {
-
         const cancelTime = policy.cancelTime || null;
-
+        const timezone = policy.timezone || null;
         const amount = policy.amount ?? null;
 
-        const parsedDate = cancelTime
-            ? new Date(
-                /Z$|[+-]\d{2}:\d{2}$/.test(String(cancelTime))
-                    ? cancelTime
-                    : `${String(cancelTime).replace(" ", "T")}Z`
-            )
-            : null;
+        let parsedDate = null;
+
+        if (cancelTime) {
+            const value = String(cancelTime).trim();
+
+            // Une date avec décalage explicite est exploitable.
+            const hasOffset = /Z$|[+-]\d{2}:\d{2}$/.test(value);
+
+            // Sans décalage, on ne convertit que GMT/UTC.
+            const isGMT = ["GMT", "UTC"].includes(
+                String(timezone || "").toUpperCase()
+            );
+
+            if (hasOffset || isGMT) {
+                const normalized = hasOffset
+                    ? value
+                    : `${value.replace(" ", "T")}Z`;
+
+                const date = new Date(normalized);
+
+                if (!Number.isNaN(date.getTime())) {
+                    parsedDate = date;
+                }
+            }
+        }
 
         return {
             cancelTime,
             amount,
             currency: policy.currency || offer.currency || null,
-            timezone: policy.timezone || null,
-            parsedDate:
-                parsedDate && !Number.isNaN(parsedDate.getTime())
-                    ? parsedDate
-                    : null
+            type: policy.type || null,
+            timezone,
+            parsedDate
         };
     });
 
@@ -3504,7 +3519,6 @@ function getOfferCancellationDetails(offer) {
 
     const now = new Date();
 
-    // Seules les pénalités valides et datées sont exploitables.
     const validPenalties = penalties.filter(policy =>
         policy.parsedDate &&
         policy.amount !== null &&
@@ -3512,8 +3526,8 @@ function getOfferCancellationDetails(offer) {
         Number(policy.amount) >= 0
     );
 
-    // La gratuité est encore applicable uniquement si
-    // une règle à zéro est datée dans le futur.
+    // Une annulation gratuite doit être explicitement indiquée
+    // par une pénalité égale à zéro et une date future.
     const freeCancellationDeadlines = validPenalties
         .filter(policy =>
             Number(policy.amount) === 0 &&
@@ -3527,10 +3541,9 @@ function getOfferCancellationDetails(offer) {
         refundable &&
         freeCancellationDeadlines.length > 0;
 
-    const freeCancellationUntil =
-        hasFreeCancellation
-            ? freeCancellationDeadlines[0].cancelTime
-            : null;
+    const freeCancellationUntil = hasFreeCancellation
+        ? freeCancellationDeadlines[0].cancelTime
+        : null;
 
     return {
         tag: tag || "UNKNOWN",
@@ -3538,11 +3551,15 @@ function getOfferCancellationDetails(offer) {
         nonRefundable,
         hasFreeCancellation,
         freeCancellationUntil,
+
         penalties: penalties.map(({ parsedDate, ...policy }) => policy),
+
         policyDetailsAvailable: validPenalties.length > 0,
+
         raw: policies
     };
 }
+
 
 
 // ============================================================
@@ -3759,9 +3776,15 @@ function formatPublicHotelOffer(storedOffer, index) {
                 cancellation.policyDetailsAvailable
             ),
 
-            penalties: Array.isArray(cancellation.penalties)
-                ? cancellation.penalties
-                : []
+           penalties: Array.isArray(cancellation.penalties)
+    ? cancellation.penalties.map(policy => ({
+        cancelTime: policy.cancelTime || null,
+        amount: policy.amount ?? null,
+        currency: policy.currency || offer.currency || null,
+        type: policy.type || null,
+        timezone: policy.timezone || null
+    }))
+    : []
         }
     };
 }
@@ -4363,6 +4386,40 @@ console.log("========================================");
 
 
 const rankedOffers = rankHotelOffers(offers);
+
+console.log(
+    "🔎 TOURIZIA — CONDITIONS ANNULATION LITEAPI:",
+    JSON.stringify(
+        rankedOffers.slice(0, 5).map(offer => ({
+            hotel: offer.hotelName,
+            room: offer.roomName,
+            price: offer.price,
+            currency: offer.currency,
+
+            providerTag: offer.cancellation?.tag,
+
+            refundable: offer.cancellation?.refundable,
+            nonRefundable: offer.cancellation?.nonRefundable,
+
+            hasFreeCancellation:
+                offer.cancellation?.hasFreeCancellation,
+
+            freeCancellationUntil:
+                offer.cancellation?.freeCancellationUntil,
+
+            policyDetailsAvailable:
+                offer.cancellation?.policyDetailsAvailable,
+
+            penalties: offer.cancellation?.penalties,
+
+            rawPolicies:
+                offer.cancellationPolicies
+        })),
+        null,
+        2
+    )
+);
+
 
 console.log(
     "🏨 CATALOGUE LITEAPI:",
