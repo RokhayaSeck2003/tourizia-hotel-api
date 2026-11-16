@@ -581,36 +581,42 @@ const HOTEL_PAYTECH_PRICE = 8333.3; // XOF 8500 — valeur de test
 // TOURIZIA — CODES PROMO PARTENAIRES HÔTELS
 // ============================================================
 
+
 const HOTEL_PROMO_CONFIG = {
     discountPercent: 5,
-    commissionUsd: 2,
+    commissionUsd: 2, // Commission par défaut
 
     partners: {
         YOONU_TUKKI: {
             partnerId: "PARTNER_01",
-            partnerName: "Monsieur Seydina Alioune Diassine",
+            partnerName: "Monsieur Seydina Alioune DIASSINE",
+            commissionUsd: 2,
             active: true
         },
 
         WAGNU_INNA: {
             partnerId: "PARTNER_02",
             partnerName: "Madame Inna Cuisine",
+            commissionUsd: 3,
             active: true
         },
 
         TOURIZIA03: {
             partnerId: "PARTNER_03",
             partnerName: "Partenaire 3",
+            commissionUsd: 2,
             active: true
         },
 
         TOURIZIA04: {
             partnerId: "PARTNER_04",
             partnerName: "Partenaire 4",
+            commissionUsd: 2,
             active: true
         }
     }
 };
+
 
 
 // ============================================================
@@ -691,7 +697,8 @@ function calculateHotelPromo(data, totalPersons, paymentMethod) {
 
             discountPercent,
 
-            commissionAmount: HOTEL_PROMO_CONFIG.commissionUsd,
+            commissionAmount:
+    Number(partner.commissionUsd ?? HOTEL_PROMO_CONFIG.commissionUsd),
             commissionCurrency: "USD",
             commissionStatus: "PENDING",
             commissionPaidAt: null
