@@ -6236,16 +6236,17 @@ async function prebookHotelOffer(offerId) {
         throw error;
     }
 
-    console.log(
-        "🔐 PREBOOK STATUS:",
-        response.status
-    );
-
-    error.providerCode = Number(
-    result.error?.code ?? result.code ?? 0
+   
+console.log(
+    "🔐 PREBOOK STATUS:",
+    response.status
 );
 
-error.providerStatus = response.status;
+console.log(
+    "🔎 LITEAPI PREBOOK RESPONSE:",
+    JSON.stringify(result, null, 2)
+);
+
 
     // 3. Distinguer un refus explicite
     // d'une erreur serveur potentiellement ambiguë.
@@ -6266,15 +6267,34 @@ error.providerStatus = response.status;
             JSON.stringify(result.error || result) ||
             "Impossible de pré-réserver cette offre";
 
-        const error = new Error(errorMessage);
+        
+const error = new Error(errorMessage);
 
-        // 408 et erreurs serveur :
-        // résultat potentiellement incertain.
-        error.prebookOutcomeUnknown =
-            response.status === 408 ||
-            response.status >= 500;
+// Code et statut réels retournés par LiteAPI.
+// Ils doivent être attachés à l'erreur APRÈS sa création.
+error.providerCode = Number(
+    result?.error?.code ??
+    result?.code ??
+    0
+);
 
-        throw error;
+error.providerStatus = response.status;
+
+// Un timeout ou une erreur serveur peut avoir
+// un résultat incertain : ne pas relancer automatiquement.
+error.prebookOutcomeUnknown =
+    response.status === 408 ||
+    response.status >= 500;
+
+console.error("🔎 PREBOOK DIAGNOSTIC:", {
+    providerCode: error.providerCode,
+    providerStatus: error.providerStatus,
+    message: error.message,
+    prebookOutcomeUnknown: error.prebookOutcomeUnknown
+});
+
+throw error;
+
     }
 
     console.log(
