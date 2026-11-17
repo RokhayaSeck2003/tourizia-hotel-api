@@ -5373,6 +5373,81 @@ const prebookTime = new Date();
             error
         );
 
+
+// ================================================
+// LITEAPI — OFFRE SÉLECTIONNÉE DEVENUE INDISPONIBLE
+// ================================================
+
+const offerUnavailable =
+    Number(error.providerCode) === 2001 ||
+    /no prebook availability|no availability found/i.test(
+        String(error.message || "")
+    );
+
+if (prebookClaimed && offerUnavailable) {
+
+    const resetTime = new Date();
+
+    const reset = await hotelTransactions.updateOne(
+        {
+            transactionId,
+            type: "hotel",
+            status: HOTEL_TRANSACTION_STATUS.PREBOOKING
+        },
+        {
+            $set: {
+                status: HOTEL_TRANSACTION_STATUS.OFFER_FOUND,
+                updatedAt: resetTime,
+                error: {
+                    step: "PREBOOK",
+                    status: "OFFER_UNAVAILABLE",
+                    message: String(error.message || error),
+                    at: resetTime
+                }
+            },
+            $unset: {
+                "provider.offerId": "",
+                "provider.prebookId": "",
+                "provider.prebookReference": "",
+                selectedOffer: ""
+            },
+            $push: {
+                history: {
+                    status: HOTEL_TRANSACTION_STATUS.OFFER_FOUND,
+                    at: resetTime,
+                    reason: "PREBOOK_OFFER_UNAVAILABLE"
+                }
+            }
+        }
+    );
+
+    prebookClaimed = false;
+
+    if (reset.modifiedCount !== 1) {
+        console.error(
+            "❌ IMPOSSIBLE DE LIBÉRER L'OFFRE INDISPONIBLE:",
+            transactionId
+        );
+
+        return res.status(409).json({
+            success: false,
+            status: "PREBOOK_FAILED",
+            error: "Le dossier doit être vérifié par Tourizia.",
+            retryAllowed: false
+        });
+    }
+
+    return res.status(409).json({
+        success: false,
+        status: "OFFER_UNAVAILABLE",
+        offerUnavailable: true,
+        retryAllowed: false,
+        message:
+            "Cette offre n'est plus disponible. Veuillez choisir une autre offre dans la liste."
+    });
+}
+
+
         const prebookOutcomeUnknown =
             Boolean(
                 error.prebookOutcomeUnknown ||
@@ -6166,6 +6241,12 @@ async function prebookHotelOffer(offerId) {
         response.status
     );
 
+    error.providerCode = Number(
+    result.error?.code ?? result.code ?? 0
+);
+
+error.providerStatus = response.status;
+
     // 3. Distinguer un refus explicite
     // d'une erreur serveur potentiellement ambiguë.
     if (!response.ok) {
@@ -6433,7 +6514,7 @@ async function findPrebookableOffer(data) {
 // Le catalogue complet reste conservé côté serveur.
 // ======================================================
 
-const MAX_VISIBLE_HOTEL_OFFERS = 100;
+const MAX_VISIBLE_HOTEL_OFFERS = 300;
 
 const displayedOffers = offers.slice(
     0,
