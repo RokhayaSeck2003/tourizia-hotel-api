@@ -10410,15 +10410,15 @@ function buildCancellationPolicyText(data = {}) {
             lines.push(
                 amount === 0
                     ? "Frais d’annulation prévus : 0 (sans frais selon cette règle)"
-                    : `Montant des frais d’annulation : ${amount.toFixed(2)} ${currency}`.trim()
+                    : `Montant des frais : ${amount.toFixed(2)} ${currency}`.trim()
             );
         } else {
-            lines.push("Montant des frais d’annulation : non précisé");
+            lines.push("Montant des frais : non précisé");
         }
 
         if (policy.cancelType) {
             lines.push(
-                `Type de frais d’annulation : ${String(policy.cancelType)}`
+                `Type de frais : ${String(policy.cancelType)}`
             );
         }
 
@@ -10566,6 +10566,10 @@ const cancellationPolicy =
         data.guestName ||
         data.fullName ||
         "Client Tourizia";
+
+        const guestTitle = String(
+    data.guestTitle || ""
+).trim();
 
     const guestType =
         data.guestType ||
@@ -11051,8 +11055,12 @@ ${
                 </div>
 
                 <div class="value">
-                    ${escapeHtml(customer)}
-                </div>
+    ${escapeHtml(
+        guestTitle
+            ? guestTitle + " " + customer
+            : customer
+    )}
+</div>
 
                 <div
                     style="
@@ -11337,7 +11345,7 @@ ${
                         providerPriceLabel
                             ? `
                                 <div style="margin-bottom:7px;">
-                                    <strong>Prix total :</strong>
+                                    <strong>Prix total du séjour :</strong>
                                     ${escapeHtml(providerPriceLabel)}
                                 </div>
                               `
@@ -12182,23 +12190,28 @@ const storageErrors = [];
         );
 
 
-        const guestBooking = {
+        
+const guestBooking = {
 
-            ...booking,
+    ...booking,
 
-            // Personne concernée
-            guestName,
+    // Personne concernée
+    guestName,
 
-            guestType:
-                guest.type || "adult",
+    guestTitle:
+        guest.title || "Mr",
 
-            guestNumber:
-                i + 1,
+    guestType:
+        guest.type || "adult",
 
-            totalGuests:
-                guests.length
+    guestNumber:
+        i + 1,
 
-        };
+    totalGuests:
+        guests.length
+
+};
+
 
 
         // ----------------------------------------------------
