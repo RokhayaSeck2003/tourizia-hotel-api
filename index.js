@@ -574,7 +574,7 @@ const stripe = process.env.STRIPE_SECRET_KEY
 
 const HOTEL_STRIPE_PRICE = 860; // USD 8.60
 
-const HOTEL_PAYTECH_PRICE = 5000; // XOF 5000 — valeur de test
+const HOTEL_PAYTECH_PRICE = 4901.96; // XOF 5000 — valeur de test
 
 
 // ============================================================
