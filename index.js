@@ -572,9 +572,9 @@ const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY)
     : null;
 
-const HOTEL_STRIPE_PRICE = 1500; // USD 15
+const HOTEL_STRIPE_PRICE = 860; // USD 8.60
 
-const HOTEL_PAYTECH_PRICE = 8333.3; // XOF 8500 — valeur de test
+const HOTEL_PAYTECH_PRICE = 5000; // XOF 5000 — valeur de test
 
 
 // ============================================================
