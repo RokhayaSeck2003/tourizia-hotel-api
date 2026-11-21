@@ -601,9 +601,9 @@ const HOTEL_PROMO_CONFIG = {
             active: true
         },
 
-        TOURIZIA03: {
+        Explora_Voyages: {
             partnerId: "PARTNER_03",
-            partnerName: "Partenaire 3",
+            partnerName: "M.NDIAYE",
             commissionUsd: 2,
             active: true
         },
