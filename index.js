@@ -587,9 +587,9 @@ const HOTEL_PROMO_CONFIG = {
     commissionUsd: 2, // Commission par défaut
 
     partners: {
-        YOONU_TUKKI: {
+        Explora_Voyages: {
             partnerId: "PARTNER_01",
-            partnerName: "Monsieur Seydina Alioune DIASSINE",
+            partnerName: "M.NDIAYE",
             commissionUsd: 2,
             active: true
         },
@@ -601,9 +601,9 @@ const HOTEL_PROMO_CONFIG = {
             active: true
         },
 
-        Explora_Voyages: {
+        YOONU_TUKKI: {
             partnerId: "PARTNER_03",
-            partnerName: "M.NDIAYE",
+            partnerName: "Monsieur Seydina Alioune DIASSINE",
             commissionUsd: 2,
             active: true
         },
